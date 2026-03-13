@@ -74,6 +74,9 @@
     "dialog:allow-confirm",
     "dialog:default",
     "shell:default",
-    "fs:default"
+    "fs:default",
+    "autostart:allow-enable",
+    "autostart:allow-disable",
+    "autostart:allow-is-enabled"
   ]
 }

@@ -779,6 +779,11 @@ async fn main() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        // 开机自启动插件（macOS 使用 LaunchAgent，Windows 使用注册表）
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
             // 当用户尝试打开第二个实例时，将焦点给到现有窗口
             if let Some(window) = app.get_webview_window("main") {

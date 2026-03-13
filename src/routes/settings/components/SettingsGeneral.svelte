@@ -1,12 +1,30 @@
 <script>
-  import { createEventDispatcher } from 'svelte';
+  import { createEventDispatcher, onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
+  import { enable as enableAutostart, disable as disableAutostart, isEnabled as isAutostartEnabled } from '@tauri-apps/plugin-autostart';
   import SettingsAI from './SettingsAI.svelte';
   
   export let config;
   export let providers = [];
   
   const dispatch = createEventDispatcher();
+
+  // 开机自启动状态（独立于 config，由系统 API 驱动）
+  let autoStartEnabled = false;
+
+  onMount(async () => {
+    try {
+      // 初始化时从系统查询实际的自启动状态
+      autoStartEnabled = await isAutostartEnabled();
+      // 同步 config 字段（可能与系统状态不一致）
+      if (config.auto_start !== autoStartEnabled) {
+        config.auto_start = autoStartEnabled;
+        dispatch('change', config);
+      }
+    } catch (e) {
+      console.error('查询自启动状态失败:', e);
+    }
+  });
 
   // 小时选项 (0-23)
   const hours = Array.from({ length: 24 }, (_, i) => i);
@@ -48,6 +66,23 @@
 
   function handleChange() {
     dispatch('change', config);
+  }
+
+  // 开机自启动切换
+  async function toggleAutoStart() {
+    try {
+      if (autoStartEnabled) {
+        await disableAutostart();
+        autoStartEnabled = false;
+      } else {
+        await enableAutostart();
+        autoStartEnabled = true;
+      }
+      config.auto_start = autoStartEnabled;
+      dispatch('change', config);
+    } catch (e) {
+      console.error('设置开机自启动失败:', e);
+    }
   }
 
   // Dock 图标
@@ -107,6 +142,22 @@
         </div>
       </div>
       <p class="text-xs text-slate-400 mt-2">此时间段内的活动将被计入工作时长统计</p>
+    </div>
+
+    <hr class="border-slate-200 dark:border-slate-700" />
+
+    <!-- 开机自启动 -->
+    <div class="flex items-center justify-between">
+      <div>
+        <div class="text-sm font-medium text-slate-700 dark:text-slate-300">开机自启动</div>
+        <div class="text-xs text-slate-400 mt-0.5">系统启动时自动运行 Work Review</div>
+      </div>
+      <button
+        on:click={toggleAutoStart}
+        class="relative w-11 h-6 rounded-full transition-colors duration-200 {autoStartEnabled ? 'bg-primary-500' : 'bg-slate-300 dark:bg-slate-600'}"
+      >
+        <span class="absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform duration-200 {autoStartEnabled ? 'translate-x-5' : 'translate-x-0'}"></span>
+      </button>
     </div>
 
     <hr class="border-slate-200 dark:border-slate-700" />

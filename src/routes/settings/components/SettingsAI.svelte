@@ -8,29 +8,23 @@
   
   const dispatch = createEventDispatcher();
   
-  // 日报生成模式配置（移除视觉分析模式）
+  // 日报生成模式：基础模板 vs AI 增强
   const aiModes = [
     { 
       value: 'local', 
-      icon: '📄',
       label: '基础模板', 
-      description: '使用固定格式生成统计报告',
-      badge: '可用',
-      badgeClass: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400',
+      description: '固定格式统计报告',
       requiresText: false
     },
     { 
       value: 'summary', 
-      icon: '✨',
       label: 'AI 增强', 
-      description: '调用 AI 生成智能工作总结',
-      badge: '需配置',
-      badgeClass: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400',
+      description: '调用 AI 生成智能总结',
       requiresText: true
     },
   ];
 
-  // 提供商默认配置（从后端获取的 providers 中读取）
+  // 提供商默认配置
   function getProviderDefaults(providerId) {
     const provider = providers.find(p => p.id === providerId);
     return {
@@ -40,41 +34,38 @@
     };
   }
 
-  // 从全局 store 订阅状态
+  // 从全局 store 订阅测试状态
   let textTestStatus = null;
   let textTestMessage = '';
   let textConnectionVerified = false;
   
-  // 订阅 aiStore 状态变化
   const unsubscribe = aiStore.subscribe(state => {
     textTestStatus = state.textTestStatus;
     textTestMessage = state.textTestMessage;
     textConnectionVerified = state.textConnectionVerified;
   });
 
-  // 检查文本模型是否已配置（必须测试成功才算已配置）
+  // 是否已配置（必须测试成功）
   $: isTextModelConfigured = textConnectionVerified;
-  
-  // 检查是否有配置值（用于判断是否需要自动测试）
   $: hasTextModelConfig = !!(config?.text_model?.endpoint && config?.text_model?.model);
 
-  // 响应式计算模式可用性
+  // 模式可用性
   $: modeAvailability = aiModes.reduce((acc, mode) => {
-    let available = true;
-    if (mode.requiresText && !isTextModelConfigured) available = false;
-    acc[mode.value] = available;
+    acc[mode.value] = mode.requiresText ? isTextModelConfigured : true;
     return acc;
   }, {});
 
-  // 当前选中的提供商信息
+  // 当前提供商
   $: currentProvider = providers.find(p => p.id === config?.text_model?.provider) || providers[0];
   $: requiresApiKey = currentProvider?.requires_api_key ?? true;
 
-  // 每个 provider 的配置缓存（用于切换时保留配置）
+  // 是否选择了 AI 增强模式（决定是否展开配置面板）
+  $: isAiMode = config.ai_mode === 'summary';
+
+  // 每个 provider 的配置缓存（切换时保留配置）
   let providerConfigs = {};
   let configInitialized = false;
 
-  // 初始化时缓存当前配置
   $: if (config?.text_model?.provider && !configInitialized) {
     providerConfigs[config.text_model.provider] = {
       endpoint: config.text_model.endpoint,
@@ -87,7 +78,7 @@
   function handleProviderChange(e) {
     const providerId = e.target.value;
     
-    // 保存当前 provider 的配置到缓存
+    // 缓存当前 provider 配置
     if (config.text_model.provider) {
       providerConfigs[config.text_model.provider] = {
         endpoint: config.text_model.endpoint,
@@ -96,7 +87,7 @@
       };
     }
     
-    // 尝试从缓存恢复，否则使用默认值
+    // 恢复缓存或使用默认值
     const defaults = getProviderDefaults(providerId);
     const cached = providerConfigs[providerId];
     
@@ -105,7 +96,6 @@
     config.text_model.model = cached?.model || defaults.model;
     config.text_model.api_key = cached?.api_key || '';
     
-    // 重置全局测试状态
     aiStore.reset();
     dispatch('change', config);
   }
@@ -126,7 +116,7 @@
         }
       });
       if (result.success) {
-        aiStore.setSuccess(result.message + (result.response_time_ms ? ` (${result.response_time_ms}ms)` : ''));
+        aiStore.setSuccess(result.message + (result.response_time_ms ? ` (${result.response_time_ms}ms)` : '') + '，请点击右上角保存设置');
       } else {
         aiStore.setError(result.message);
       }
@@ -135,25 +125,21 @@
     }
   }
 
-  // 计算当前配置指纹
   function getConfigHash() {
     if (!config?.text_model) return null;
     const { provider, endpoint, model, api_key } = config.text_model;
     return `${provider}|${endpoint}|${model}|${api_key || ''}`;
   }
 
-  // 组件挂载时：只在配置变化时才自动测试
+  // 挂载时只在配置变化时自动测试
   onMount(async () => {
-    // 延迟等待配置加载
     await new Promise(r => setTimeout(r, 200));
     
-    // 获取当前配置指纹
     const currentHash = getConfigHash();
     let lastHash = null;
     const unsub = aiStore.subscribe(s => { lastHash = s.lastTestedConfigHash; });
     unsub();
     
-    // 只有配置变化且有配置值时才自动测试
     if (hasTextModelConfig && currentHash !== lastHash) {
       aiStore.setConfigHash(currentHash);
       await testTextModel();
@@ -161,140 +147,84 @@
   });
 </script>
 
-<!-- 日报生成模式 -->
-<section class="mb-8">
-  <div class="flex items-center gap-3 mb-4">
-    <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-100 to-purple-100 dark:from-indigo-900/50 dark:to-purple-900/50 flex items-center justify-center">
-      <span class="text-indigo-600 dark:text-indigo-400 text-sm">AI</span>
-    </div>
-    <div>
-      <h3 class="text-base font-semibold text-slate-800 dark:text-white">日报生成</h3>
-      <p class="text-xs text-slate-500 dark:text-slate-400">时间线和概览始终可用</p>
-    </div>
-  </div>
-  
-  <div class="grid grid-cols-2 gap-3">
+<!-- 日报模式切换：紧凑的分段控制 -->
+<div class="mb-5">
+  <label class="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-2">日报模式</label>
+  <div class="flex gap-2">
     {#each aiModes as mode}
       {@const available = modeAvailability[mode.value] ?? false}
       {@const isSelected = config.ai_mode === mode.value}
       <button 
         type="button"
-        on:click={() => { if (available) { config.ai_mode = mode.value; handleChange(); } }}
-        disabled={!available}
-        class="relative p-4 rounded-xl text-left transition-all duration-200
-               {!available 
-                 ? 'opacity-40 cursor-not-allowed bg-slate-50 dark:bg-slate-800/50' 
-                 : isSelected
-                   ? 'bg-gradient-to-br from-primary-50 to-primary-100 dark:from-primary-900/30 dark:to-primary-800/20 ring-2 ring-primary-500 shadow-sm' 
-                   : 'bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700/50 ring-1 ring-slate-200 dark:ring-slate-700'}"
+        on:click={() => { if (available || !mode.requiresText) { config.ai_mode = mode.value; handleChange(); } }}
+        class="flex-1 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150
+               {isSelected
+                 ? 'bg-primary-500 text-white shadow-sm' 
+                 : available || !mode.requiresText
+                   ? 'bg-slate-100 dark:bg-slate-700/50 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
+                   : 'bg-slate-50 dark:bg-slate-800/50 text-slate-400 dark:text-slate-600 cursor-not-allowed'}"
       >
-        <!-- 图标 -->
-        <div class="text-2xl mb-2">{mode.icon}</div>
-        
-        <!-- 标题 -->
-        <div class="font-medium text-sm text-slate-800 dark:text-white mb-1">
-          {mode.label}
-        </div>
-        
-        <!-- 描述 -->
-        <div class="text-xs text-slate-500 dark:text-slate-400 mb-2">
-          {mode.description}
-        </div>
-        
-        <!-- 状态徽章 -->
-        <div class="text-xs">
-          {#if !mode.requiresText}
-            <span class="inline-flex items-center gap-1 {mode.badgeClass} px-2 py-0.5 rounded-full font-medium">
-              ✓ 可用
-            </span>
-          {:else if textTestStatus === 'testing'}
-            <span class="inline-flex items-center gap-1 bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400 px-2 py-0.5 rounded-full font-medium">
-              ⏳ 验证中...
-            </span>
-          {:else if available}
-            <span class="inline-flex items-center gap-1 bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400 px-2 py-0.5 rounded-full font-medium">
-              ✓ 已配置
-            </span>
-          {:else if textTestStatus === 'error' && hasTextModelConfig}
-            <span class="inline-flex items-center gap-1 bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400 px-2 py-0.5 rounded-full font-medium">
-              ✕ 失败
-            </span>
-          {:else}
-            <span class="inline-flex items-center gap-1 {mode.badgeClass} px-2 py-0.5 rounded-full font-medium">
-              {mode.badge}
-            </span>
-          {/if}
-        </div>
-        
-        <!-- 选中指示器 -->
-        {#if isSelected}
-          <div class="absolute top-2 right-2 w-2 h-2 rounded-full bg-primary-500"></div>
-        {/if}
+        <div>{mode.label}</div>
+        <div class="text-[10px] mt-0.5 {isSelected ? 'text-white/70' : 'text-slate-400 dark:text-slate-500'}">{mode.description}</div>
       </button>
     {/each}
   </div>
-</section>
+</div>
 
-<!-- AI 模型配置 -->
-<section class="p-5 rounded-xl bg-white dark:bg-slate-800 ring-1 ring-slate-200 dark:ring-slate-700">
-  <div class="flex items-center justify-between mb-5">
-    <div class="flex items-center gap-3">
-      <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-100 to-cyan-100 dark:from-blue-900/50 dark:to-cyan-900/50 flex items-center justify-center text-xl">
-        🤖
+<!-- AI 模型配置：仅在 AI 增强模式或已有配置时展开 -->
+{#if isAiMode || hasTextModelConfig}
+  <div class="space-y-3 pt-3 border-t border-slate-200 dark:border-slate-700">
+    <!-- 提供商 + 测试按钮 -->
+    <div class="flex items-end gap-2">
+      <div class="flex-1">
+        <label for="ai-provider" class="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5">提供商</label>
+        <select
+          id="ai-provider"
+          value={config.text_model?.provider || 'ollama'}
+          on:change={handleProviderChange}
+          class="w-full px-3 py-2 text-sm rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-600 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+        >
+          {#each providers as provider}
+            <option value={provider.id}>{provider.name}</option>
+          {/each}
+        </select>
       </div>
-      <div>
-        <h4 class="font-medium text-slate-800 dark:text-white">AI 模型配置</h4>
-        <p class="text-xs text-slate-500">选择并配置 AI 服务提供商</p>
-      </div>
-    </div>
-    
-    <button
-      on:click={testTextModel}
-      disabled={textTestStatus === 'testing'}
-      class="px-3 py-1.5 text-xs font-medium rounded-lg transition-all
-             {textTestStatus === 'success' 
-               ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400' 
-               : textTestStatus === 'error' 
-                 ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400' 
-                 : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300'}"
-    >
-      {#if textTestStatus === 'testing'}
-        <span class="inline-flex items-center gap-1.5">
-          <span class="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin"></span>
-          测试中...
-        </span>
-      {:else if textTestStatus === 'success'}
-        ✓ 已连接
-      {:else if textTestStatus === 'error'}
-        ✗ 失败
-      {:else}
-        测试连接
-      {/if}
-    </button>
-  </div>
-  
-  {#if textTestMessage}
-    <div class="mb-4 px-3 py-2 rounded-lg text-xs {textTestStatus === 'success' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400' : 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400'}">
-      {textTestMessage}
-    </div>
-  {/if}
-
-  <!-- 提供商选择（下拉框） -->
-  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-    <div>
-      <label for="ai-provider" class="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5">提供商</label>
-      <select
-        id="ai-provider"
-        value={config.text_model?.provider || 'ollama'}
-        on:change={handleProviderChange}
-        class="w-full px-3 py-2 text-sm rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-600 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+      
+      <!-- 测试按钮紧跟提供商选择 -->
+      <button
+        on:click={testTextModel}
+        disabled={textTestStatus === 'testing' || !hasTextModelConfig}
+        class="shrink-0 px-3 py-2 text-xs font-medium rounded-lg transition-all
+               {textTestStatus === 'success' 
+                 ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400' 
+                 : textTestStatus === 'error' 
+                   ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400' 
+                   : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300'}
+               disabled:opacity-40 disabled:cursor-not-allowed"
       >
-        {#each providers as provider}
-          <option value={provider.id}>{provider.name}</option>
-        {/each}
-      </select>
+        {#if textTestStatus === 'testing'}
+          <span class="inline-flex items-center gap-1">
+            <span class="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin"></span>
+            测试中
+          </span>
+        {:else if textTestStatus === 'success'}
+          ✓ 连接成功
+        {:else if textTestStatus === 'error'}
+          ✗ 连接失败
+        {:else}
+          测试连接
+        {/if}
+      </button>
     </div>
     
+    <!-- 测试结果消息 -->
+    {#if textTestMessage}
+      <div class="px-3 py-2 rounded-lg text-xs {textTestStatus === 'success' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400' : 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400'}">
+        {textTestMessage}
+      </div>
+    {/if}
+
+    <!-- API 地址 -->
     <div>
       <label for="ai-endpoint" class="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5">API 地址</label>
       <input
@@ -303,12 +233,13 @@
         bind:value={config.text_model.endpoint}
         on:change={handleChange}
         class="w-full px-3 py-2 text-sm font-mono rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-600 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-        placeholder="http://localhost:11434"
+        placeholder={currentProvider?.default_endpoint || 'http://localhost:11434'}
       />
     </div>
 
+    <!-- API 密钥（按需显示） -->
     {#if requiresApiKey}
-      <div class="sm:col-span-2">
+      <div>
         <label for="ai-apikey" class="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5">API 密钥</label>
         <input
           id="ai-apikey"
@@ -321,7 +252,8 @@
       </div>
     {/if}
 
-    <div class="sm:col-span-2">
+    <!-- 模型名称 -->
+    <div>
       <label for="ai-model" class="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5">模型名称</label>
       <input
         id="ai-model"
@@ -336,4 +268,9 @@
       {/if}
     </div>
   </div>
-</section>
+{:else}
+  <!-- 未启用 AI 模式时的提示 -->
+  <div class="pt-3 border-t border-slate-200 dark:border-slate-700">
+    <p class="text-xs text-slate-400 dark:text-slate-500 text-center py-2">切换到「AI 增强」模式后可配置 AI 模型</p>
+  </div>
+{/if}

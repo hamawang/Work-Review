@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.5] - 2026-03-13
+
+### 新增
+- 开机自启动：设置页新增「开机自启动」开关，支持 macOS（LaunchAgent）和 Windows（注册表）
+  - 集成 `tauri-plugin-autostart` 官方插件
+  - 初始化时自动查询系统实际状态并同步
+
+### 修复
+- 修复侧边栏左下角版本号与关于页不一致的问题
+  - 所有版本号展示统一通过 Tauri `getVersion()` API 动态读取
+  - 版本唯一来源为 `tauri.conf.json`，不再硬编码
+
+### 优化
+- AI 模型设置 UI 重构
+  - 模式选择从大卡片改为紧凑分段按钮
+  - 表单从混合网格统一为单列布局
+  - 测试按钮与提供商选择同行，操作更直觉
+  - 非 AI 模式时折叠配置面板，减少干扰
+
+## [1.0.4] - 2026-03-13
+
+### 新增
+- 多 AI 提供商支持：新增 Claude、Gemini API，统一 AI 调用接口
+- macOS 构建支持 ApplicationServices 框架
+
+### 修复
+- 修复小时统计 24 点溢出问题
+- 修复 macOS 编译错误（`AppError` 导入缺失）
+
+### 优化
+- 截图兼容性和监控模块稳定性优化
+- 数据库查询与存储逻辑优化
+- 存储管理清理策略改进
+
 ## [1.0.3] - 2026-03-12
 
 ### 新增

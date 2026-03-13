@@ -1,6 +1,6 @@
 [package]
 name = "work-review"
-version = "1.0.4"
+version = "1.0.5"
 
 description = "个人工作回顾与AI日报助手"
 authors = ["WorkReview Team"]
@@ -65,6 +65,9 @@ cocoa = "0.25"
 objc = "0.2"
 core-graphics = "0.23"
 core-foundation = "0.9"
+
+[target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
+tauri-plugin-autostart = "2.5.1"
 
 # 编译优化
 [profile.release]
