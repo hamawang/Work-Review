@@ -10,7 +10,8 @@
     "createUpdaterArtifacts": true,
     "targets": [
       "nsis",
-      "dmg"
+      "dmg",
+      "app"
     ],
     "windows": {
       "certificateThumbprint": null,
