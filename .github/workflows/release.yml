@@ -204,6 +204,7 @@ jobs:
             local platform_key="$1"
             local asset_file="$2"
             local signature_file="$3"
+            local base_url="$4"
 
             if [[ -z "$asset_file" || ! -f "$asset_file" || ! -f "$signature_file" ]]; then
               echo "skip ${platform_key}"
@@ -215,25 +216,47 @@ jobs:
             local asset_name
             asset_name="$(basename "$asset_file")"
 
-            json="$(jq \
+            variant_json="$(jq \
               --arg key "$platform_key" \
-              --arg url "${DOWNLOAD_BASE}/${asset_name}" \
+              --arg url "${base_url}/${asset_name}" \
               --arg signature "$signature" \
               '.platforms[$key] = { url: $url, signature: $signature }' \
-              <<<"$json")"
+              <<<"$variant_json")"
           }
 
-          add_platform "darwin-aarch64" "$MAC_AARCH64_FILE" "${MAC_AARCH64_FILE}.sig"
-          add_platform "darwin-x86_64" "$MAC_X64_FILE" "${MAC_X64_FILE}.sig"
-          add_platform "windows-x86_64" "$WINDOWS_FILE" "${WINDOWS_FILE}.sig"
+          # 为每个代理前缀生成独立的 updater JSON 文件
+          # 格式: "前缀 文件名"（前缀为空表示直连 GitHub）
+          PROXY_VARIANTS=(
+            " updater.json"
+            "https://ghproxy.cn/ updater-ghproxy.json"
+            "https://ghp.ci/ updater-ghp.json"
+          )
 
-          if [[ "$(jq '.platforms | length' <<<"$json")" -ne 3 ]]; then
-            echo "自动更新平台数量异常，期望 3 个，实际为 $(jq '.platforms | length' <<<"$json")" >&2
-            exit 1
-          fi
+          for variant in "${PROXY_VARIANTS[@]}"; do
+            proxy_prefix="${variant%% *}"
+            output_file="${variant##* }"
 
-          printf '%s\n' "$json" > updater.json
-          cat updater.json
+            if [[ -z "$proxy_prefix" ]]; then
+              VARIANT_BASE="${DOWNLOAD_BASE}"
+            else
+              VARIANT_BASE="${proxy_prefix}${DOWNLOAD_BASE}"
+            fi
+
+            variant_json="$json"
+
+            add_platform "darwin-aarch64" "$MAC_AARCH64_FILE" "${MAC_AARCH64_FILE}.sig" "$VARIANT_BASE"
+            add_platform "darwin-x86_64" "$MAC_X64_FILE" "${MAC_X64_FILE}.sig" "$VARIANT_BASE"
+            add_platform "windows-x86_64" "$WINDOWS_FILE" "${WINDOWS_FILE}.sig" "$VARIANT_BASE"
+
+            if [[ "$(jq '.platforms | length' <<<"$variant_json")" -ne 3 ]]; then
+              echo "自动更新平台数量异常 (${output_file})，期望 3 个，实际为 $(jq '.platforms | length' <<<"$variant_json")" >&2
+              exit 1
+            fi
+
+            printf '%s\n' "$variant_json" > "$output_file"
+            echo "=== ${output_file} ==="
+            cat "$output_file"
+          done
 
       - name: Create or update GitHub Release
         uses: ncipollo/release-action@v1
@@ -242,7 +265,7 @@ jobs:
           name: "Work Review ${{ github.ref_name }}"
           bodyFile: release_notes.md
           token: ${{ secrets.GITHUB_TOKEN }}
-          artifacts: "all-artifacts/**/*,updater.json"
+          artifacts: "all-artifacts/**/*,updater.json,updater-ghproxy.json,updater-ghp.json"
           artifactErrorsFailBuild: false
           replacesArtifacts: true
           makeLatest: legacy

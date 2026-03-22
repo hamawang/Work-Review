@@ -30,7 +30,7 @@
     isClearing = true;
     try {
       const result = await invoke('clear_old_activities');
-      showToast(result.message);
+      showToast(result?.message || '清理完成');
       cache.clear();
       dispatch('clearCache');
     } catch (e) {

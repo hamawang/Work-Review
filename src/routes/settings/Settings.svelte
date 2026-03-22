@@ -9,8 +9,6 @@
   import SettingsAppearance from './components/SettingsAppearance.svelte';
   import SettingsPrivacy from './components/SettingsPrivacy.svelte';
   import SettingsStorage from './components/SettingsStorage.svelte';
-  import { aiStore } from '../../lib/stores/ai.js';
-
   let config = null;
   let loading = true;
   let saving = false;
@@ -55,6 +53,9 @@
       if (!config.text_model) {
         config.text_model = { provider: 'ollama', endpoint: 'http://localhost:11434', api_key: null, model: 'qwen2.5' };
       }
+      if (!config.text_model_profiles) {
+        config.text_model_profiles = [];
+      }
       if (!config.vision_model) {
         config.vision_model = { provider: 'ollama', endpoint: 'http://localhost:11434', api_key: null, model: 'llava' };
       }
@@ -94,25 +95,11 @@
     error = null;
     success = false;
 
-    // 验证 AI 设置
-    let aiState;
-    const unsub = aiStore.subscribe(s => aiState = s);
-    unsub();
-
-    let fallbackWarning = false;
-    if (config.ai_mode === 'summary' && (!aiState || !aiState.textConnectionVerified)) {
-      config.ai_mode = 'local';
-      fallbackWarning = true;
-    }
-
     try {
       await invoke('save_config', { config });
       success = true;
       cache.setConfig(config);
-      
-      if (fallbackWarning) {
-        showToast('AI 模型尚未通过测试，日报模式已自动重置为基础模板', 'warning');
-      }
+      showToast('设置已保存', 'success');
       
       setTimeout(() => success = false, 3000);
     } catch (e) {
@@ -213,8 +200,8 @@
         <SettingsGeneral bind:config on:change={() => {}} />
       {:else if activeTab === 'ai'}
         <div class="page-card">
-          <h3 class="settings-card-title">AI 模型配置</h3>
-          <p class="settings-card-desc">配置 AI 模型用于生成工作日报</p>
+          <h3 class="settings-card-title">模型连接</h3>
+          <p class="settings-card-desc">配置当前默认模型，并管理多个可供助手页切换的连接</p>
           <SettingsAI bind:config {providers} on:change={() => {}} />
         </div>
       {:else if activeTab === 'appearance'}

@@ -22,6 +22,34 @@ pub struct ActiveWindow {
     pub browser_url: Option<String>,
 }
 
+/// 判断进程名是否属于系统/桌面 shell 进程（不应记录使用时长）
+/// 这些进程在锁屏/睡眠/唤醒/桌面切换时短暂成为前台，不代表真正的用户活动
+pub fn is_system_process(app_name: &str) -> bool {
+    let name_lower = app_name.to_lowercase();
+    let name_lower = name_lower.trim_end_matches(".exe");
+
+    matches!(
+        name_lower,
+        // Windows 桌面 / 锁屏 / 搜索
+        "desktop"
+            | "lockapp"
+            | "logonui"
+            | "searchapp"
+            | "searchhost"
+            | "shellexperiencehost"
+            | "startmenuexperiencehost"
+            | "textinputhost"
+            | "applicationframehost"
+            | "dwm"
+            | "csrss"
+            | "taskmgr"
+            // macOS 桌面 / 锁屏
+            | "loginwindow"
+            | "screensaverengine"
+            | "screensaver"
+    )
+}
+
 /// 判断进程名是否属于浏览器
 pub fn is_browser_app(app_name: &str) -> bool {
     let app_lower = app_name.to_lowercase();
@@ -282,13 +310,9 @@ pub fn get_active_window() -> Result<ActiveWindow> {
     unsafe {
         let hwnd = GetForegroundWindow();
         if hwnd.is_null() {
-            // Win10 上切换窗口/UAC弹窗时可能返回 null，不应直接报错
-            // 降级返回 Desktop，确保不丢失轮询周期的时长
-            return Ok(ActiveWindow {
-                app_name: "Desktop".to_string(),
-                window_title: String::new(),
-                browser_url: None,
-            });
+            // null HWND 出现在睡眠/现代待机唤醒、UAC弹窗、窗口切换瞬间等场景
+            // 此时没有真实的前台窗口，不应伪造应用名，由调用方决定如何处理
+            return Err(anyhow::anyhow!("no foreground window"));
         }
 
         // 获取窗口标题

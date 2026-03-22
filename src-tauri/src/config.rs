@@ -150,6 +150,26 @@ impl ModelConfig {
     }
 }
 
+/// 可保存的文本模型档案
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct TextModelProfile {
+    /// 档案唯一标识
+    pub id: String,
+    /// 档案显示名称
+    pub name: String,
+    /// 对应模型配置
+    pub model_config: ModelConfig,
+    /// 最近一次测试状态：untested / success / error
+    #[serde(default = "default_connection_status")]
+    pub test_status: String,
+    /// 最近一次测试时间（毫秒时间戳）
+    #[serde(default)]
+    pub last_tested_at: Option<u64>,
+    /// 最近一次测试结果描述
+    #[serde(default)]
+    pub last_test_message: Option<String>,
+}
+
 /// AI 提供商配置（旧版，保留用于向后兼容）
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AiProviderConfig {
@@ -326,6 +346,9 @@ pub struct AppConfig {
     /// 文本模型配置
     #[serde(default = "ModelConfig::default_text")]
     pub text_model: ModelConfig,
+    /// 可保存的文本模型档案
+    #[serde(default)]
+    pub text_model_profiles: Vec<TextModelProfile>,
     /// 视觉模型配置
     #[serde(default = "ModelConfig::default_vision")]
     pub vision_model: ModelConfig,
@@ -398,6 +421,7 @@ impl Default for AppConfig {
             screenshot_interval: 30,
             ai_mode: AiMode::Local,
             text_model: ModelConfig::default_text(),
+            text_model_profiles: Vec::new(),
             vision_model: ModelConfig::default_vision(),
             privacy: PrivacyConfig::default(),
             storage: StorageConfig::default(),
@@ -481,6 +505,18 @@ impl AppConfig {
         if self.background_opacity <= 0.05 && self.background_image.is_some() {
             self.background_opacity = 0.25;
         }
+
+        // 为现有单模型配置自动补一份可复用档案，便于助手页直接切换
+        if self.text_model_profiles.is_empty() && is_model_configured(&self.text_model) {
+            self.text_model_profiles.push(TextModelProfile {
+                id: "default-text-model".to_string(),
+                name: default_profile_name(&self.text_model),
+                model_config: self.text_model.clone(),
+                test_status: default_connection_status(),
+                last_tested_at: None,
+                last_test_message: None,
+            });
+        }
     }
 
     /// 获取文本模型端点
@@ -492,4 +528,20 @@ impl AppConfig {
     pub fn get_vision_endpoint(&self) -> &str {
         &self.vision_model.endpoint
     }
+}
+
+fn is_model_configured(model_config: &ModelConfig) -> bool {
+    !model_config.endpoint.trim().is_empty() && !model_config.model.trim().is_empty()
+}
+
+fn default_profile_name(model_config: &ModelConfig) -> String {
+    format!(
+        "{} · {}",
+        model_config.provider.display_name(),
+        model_config.model.trim()
+    )
+}
+
+fn default_connection_status() -> String {
+    "untested".to_string()
 }

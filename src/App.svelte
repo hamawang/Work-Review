@@ -3,6 +3,7 @@
   import Router from 'svelte-spa-router';
   import Sidebar from './lib/components/Sidebar.svelte';
   import Toast from './lib/components/Toast.svelte';
+  import ConfirmDialog from './lib/components/ConfirmDialog.svelte';
   import Overview from './routes/Overview.svelte';
   import Timeline from './routes/timeline/Timeline.svelte';
   import Summary from './routes/timeline/Summary.svelte';
@@ -345,5 +346,6 @@
       <Router {routes} />
     </main>
     <Toast />
+    <ConfirmDialog />
   </div>
 </div>

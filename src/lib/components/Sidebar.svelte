@@ -23,7 +23,7 @@
     { path: '/', label: '概览', icon: 'home' },
     { path: '/timeline', label: '时间线', icon: 'timeline' },
     { path: '/report', label: '日报', icon: 'report' },
-    { path: '/ask', label: '记忆', icon: 'ask' },
+    { path: '/ask', label: '助手', icon: 'ask' },
     { path: '/settings', label: '设置', icon: 'settings' },
     { path: '/about', label: '关于', icon: 'info' },
   ];

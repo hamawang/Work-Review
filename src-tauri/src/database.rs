@@ -885,11 +885,13 @@ impl Database {
             std::collections::HashMap::new();
         for usage in app_usage_rows {
             let normalized_name = crate::monitor::normalize_display_app_name(&usage.app_name);
-            let entry = app_usage_map.entry(normalized_name.clone()).or_insert(AppUsage {
-                app_name: normalized_name,
-                duration: 0,
-                count: 0,
-            });
+            let entry = app_usage_map
+                .entry(normalized_name.clone())
+                .or_insert(AppUsage {
+                    app_name: normalized_name,
+                    duration: 0,
+                    count: 0,
+                });
             entry.duration += usage.duration;
             entry.count += usage.count;
         }
@@ -944,17 +946,17 @@ impl Database {
 
         let browser_activity_rows: Vec<(String, Option<String>, String, Option<String>, i64)> =
             browser_activity_stmt
-            .query_map(params![start_ts, end_ts], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, Option<String>>(3)?,
-                    row.get::<_, i64>(4)?,
-                ))
-            })?
-            .filter_map(|r| r.ok())
-            .collect();
+                .query_map(params![start_ts, end_ts], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, i64>(4)?,
+                    ))
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
 
         // 按浏览器 -> 域名 -> URL 三级结构组织数据
         // 结构: { browser_name: { domain: { url: duration } } }
@@ -1017,8 +1019,7 @@ impl Database {
                             url_details.sort_by(|a, b| {
                                 b.duration.cmp(&a.duration).then_with(|| a.url.cmp(&b.url))
                             });
-                            let domain_duration: i64 =
-                                url_details.iter().map(|u| u.duration).sum();
+                            let domain_duration: i64 = url_details.iter().map(|u| u.duration).sum();
                             DomainUsage {
                                 domain: domain.clone(),
                                 duration: domain_duration,
@@ -1187,6 +1188,50 @@ impl Database {
                 })
             })?
             .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(activities)
+    }
+
+    /// 获取日期范围内的原始活动记录
+    /// 返回按时间升序排列的明细，用于 session 聚合、意图识别和待办提取
+    pub fn get_activities_in_range(
+        &self,
+        date_from: Option<&str>,
+        date_to: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<Activity>> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+
+        let limit = limit.clamp(1, 10_000) as i64;
+        let (start_ts, end_ts) = parse_date_bounds(date_from, date_to);
+
+        let mut stmt = conn.prepare(
+            "SELECT id, timestamp, app_name, window_title, screenshot_path, ocr_text, category, duration, browser_url
+             FROM activities
+             WHERE (?1 IS NULL OR timestamp >= ?1)
+               AND (?2 IS NULL OR timestamp < ?2)
+             ORDER BY timestamp ASC, id ASC
+             LIMIT ?3",
+        )?;
+
+        let activities = stmt
+            .query_map(params![start_ts, end_ts, limit], |row| {
+                Ok(Activity {
+                    id: Some(row.get(0)?),
+                    timestamp: row.get(1)?,
+                    app_name: row.get(2)?,
+                    window_title: row.get(3)?,
+                    screenshot_path: row.get(4)?,
+                    ocr_text: row.get(5)?,
+                    category: row.get(6)?,
+                    duration: row.get(7)?,
+                    browser_url: row.get(8)?,
+                })
+            })?
+            .filter_map(|row| row.ok())
             .collect();
 
         Ok(activities)
@@ -1395,7 +1440,9 @@ impl Database {
         )?;
 
         let rows: Vec<(String, i64)> = stmt
-            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))?
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })?
             .filter_map(|r| r.ok())
             .collect();
 
@@ -1450,23 +1497,32 @@ impl Database {
              LIMIT ?3",
         )?;
 
-        let activity_rows: Vec<(i64, i64, String, String, Option<String>, Option<String>, i64)> =
-            activity_stmt
-                .query_map(params![start_ts, end_ts, fetch_limit], |row| {
-                    Ok((
-                        row.get::<_, i64>(0)?,
-                        row.get::<_, i64>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, Option<String>>(4)?,
-                        row.get::<_, Option<String>>(5)?,
-                        row.get::<_, i64>(6)?,
-                    ))
-                })?
-                .filter_map(|row| row.ok())
-                .collect();
+        let activity_rows: Vec<(
+            i64,
+            i64,
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+            i64,
+        )> = activity_stmt
+            .query_map(params![start_ts, end_ts, fetch_limit], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, i64>(6)?,
+                ))
+            })?
+            .filter_map(|row| row.ok())
+            .collect();
 
-        for (id, timestamp, app_name, window_title, ocr_text, browser_url, duration) in activity_rows {
+        for (id, timestamp, app_name, window_title, ocr_text, browser_url, duration) in
+            activity_rows
+        {
             let score = score_memory_match(
                 trimmed_query,
                 &[
@@ -1521,7 +1577,11 @@ impl Database {
 
         let hourly_rows: Vec<(i64, String, i32, String, String, i64, i64)> = hourly_stmt
             .query_map(
-                params![report_date_from.as_deref(), report_date_to.as_deref(), fetch_limit],
+                params![
+                    report_date_from.as_deref(),
+                    report_date_to.as_deref(),
+                    fetch_limit
+                ],
                 |row| {
                     Ok((
                         row.get::<_, i64>(0)?,
@@ -1538,8 +1598,10 @@ impl Database {
             .collect();
 
         for (id, date, hour, summary, main_apps, total_duration, created_at) in hourly_rows {
-            let score =
-                score_memory_match(trimmed_query, &[&summary, &main_apps, &date, &hour.to_string()]);
+            let score = score_memory_match(
+                trimmed_query,
+                &[&summary, &main_apps, &date, &hour.to_string()],
+            );
             if score <= 0 {
                 continue;
             }
@@ -1569,7 +1631,11 @@ impl Database {
 
         let report_rows: Vec<(String, String, String, Option<String>, i64)> = report_stmt
             .query_map(
-                params![report_date_from.as_deref(), report_date_to.as_deref(), fetch_limit],
+                params![
+                    report_date_from.as_deref(),
+                    report_date_to.as_deref(),
+                    fetch_limit
+                ],
                 |row| {
                     Ok((
                         row.get::<_, String>(0)?,
@@ -1586,7 +1652,12 @@ impl Database {
         for (date, content, ai_mode, model_name, created_at) in report_rows {
             let score = score_memory_match(
                 trimmed_query,
-                &[&date, &content, &ai_mode, model_name.as_deref().unwrap_or("")],
+                &[
+                    &date,
+                    &content,
+                    &ai_mode,
+                    model_name.as_deref().unwrap_or(""),
+                ],
             );
             if score <= 0 {
                 continue;

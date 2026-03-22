@@ -1,8 +1,8 @@
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-shell';
 import { check } from '@tauri-apps/plugin-updater';
-import { ask, message as showMessage } from '@tauri-apps/plugin-dialog';
 import { relaunch } from '@tauri-apps/plugin-process';
+import { confirm } from '$lib/stores/confirm.js';
 import { showToast } from '$lib/stores/toast.js';
 
 const DEFAULT_RELEASE_URL = 'https://github.com/wm94i/Work_Review/releases/latest';
@@ -12,7 +12,13 @@ const UPDATE_DOWNLOAD_TIMEOUT_MS = 5 * 60 * 1000;
 let updateInFlight = false;
 
 async function promptOpenRelease(message, releaseUrl = DEFAULT_RELEASE_URL) {
-  const openRelease = await ask(message, { title: '更新提示', kind: 'warning' });
+  const openRelease = await confirm({
+    title: '更新提示',
+    message,
+    confirmText: '打开 Releases',
+    cancelText: '稍后处理',
+    tone: 'warning',
+  });
   if (openRelease) {
     await open(releaseUrl);
   }
@@ -44,10 +50,13 @@ export async function runUpdateFlow(options = {}) {
     }
 
     if (confirmBeforeDownload) {
-      const shouldStart = await ask(
-        `检测到新版本 ${releaseInfo.latestVersion}。是否现在开始更新？`,
-        { title: '发现新版本', kind: 'info' }
-      );
+      const shouldStart = await confirm({
+        title: '发现新版本',
+        message: `检测到新版本 ${releaseInfo.latestVersion}。是否现在开始更新？`,
+        confirmText: '立即更新',
+        cancelText: '稍后再说',
+        tone: 'info',
+      });
 
       if (!shouldStart) {
         onStatusChange('');
@@ -121,7 +130,17 @@ export async function runUpdateFlow(options = {}) {
       await promptOpenRelease('更新包下载失败。是否打开 Releases 页面手动下载最新版本？');
     } else {
       onStatusChange('检查更新失败');
-      await showMessage(`检查更新出现问题: ${errMsg}`, { title: '错误', kind: 'error' });
+      await confirm({
+        title: '更新错误',
+        message: `检查更新出现问题: ${errMsg}`,
+        confirmText: '我知道了',
+        cancelText: '打开 Releases',
+        tone: 'error',
+      }).then(async (confirmed) => {
+        if (!confirmed) {
+          await open(DEFAULT_RELEASE_URL);
+        }
+      });
     }
 
     return { updated: false, error: errMsg };

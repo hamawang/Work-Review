@@ -11,7 +11,13 @@ export const toast = {
 
 export function showToast(message, type = 'info', duration = 3000) {
   const normalizedMessage = typeof message === 'string' ? message.trim() : '';
-  if (!normalizedMessage) {
+  const normalizedLower = normalizedMessage.toLowerCase();
+
+  if (
+    !normalizedMessage ||
+    normalizedLower === 'undefined' ||
+    normalizedLower === 'null'
+  ) {
     return;
   }
 

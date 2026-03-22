@@ -631,3 +631,95 @@
 .markdown-body blockquote {
   @apply border-l-4 border-primary-500 pl-4 italic text-slate-600 dark:text-slate-400 my-4;
 }
+
+/* Markdown 标题间距（统一日报 / 助手等多页面） */
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3 {
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+}
+
+.markdown-body h1:first-child,
+.markdown-body h2:first-child {
+  margin-top: 0;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+  padding-left: 1.5em;
+}
+
+.markdown-body li {
+  margin: 0.25em 0;
+}
+
+/* Excel 风格表格样式 */
+.markdown-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 0.875rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+
+.markdown-body thead {
+  background: linear-gradient(to bottom, #f8fafc, #f1f5f9);
+}
+
+.dark .markdown-body thead {
+  background: linear-gradient(to bottom, #334155, #1e293b);
+}
+
+.markdown-body th {
+  padding: 0.75rem 1rem;
+  text-align: center;
+  font-weight: 600;
+  color: #475569;
+  border-bottom: 2px solid #e2e8f0;
+  white-space: nowrap;
+}
+
+.dark .markdown-body th {
+  color: #e2e8f0;
+  border-bottom-color: #475569;
+}
+
+.markdown-body td {
+  padding: 0.625rem 1rem;
+  border-bottom: 1px solid #e2e8f0;
+  color: #334155;
+  text-align: center;
+}
+
+.dark .markdown-body td {
+  border-bottom-color: #334155;
+  color: #cbd5e1;
+}
+
+.markdown-body tbody tr:hover {
+  background-color: #f8fafc;
+}
+
+.dark .markdown-body tbody tr:hover {
+  background-color: #1e293b;
+}
+
+.markdown-body tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* 第一列左对齐 */
+.markdown-body td:first-child,
+.markdown-body th:first-child {
+  text-align: left;
+  font-weight: 500;
+}
+
+/* 最后一列右对齐 */
+.markdown-body td:last-child,
+.markdown-body th:last-child {
+  text-align: right;
+}

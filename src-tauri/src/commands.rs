@@ -1,6 +1,11 @@
 use crate::config::{AiProvider, AiProviderConfig, AppConfig, ModelConfig};
 use crate::database::{Activity, DailyReport, DailyStats, MemorySearchItem};
 use crate::error::AppError;
+use crate::work_intelligence::{
+    analyze_intents, build_work_sessions, extract_todos,
+    generate_weekly_review as build_weekly_review, IntentAnalysisResult, TodoExtractionResult,
+    WeeklyReviewResult, WorkSession,
+};
 use crate::AppState;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -13,8 +18,8 @@ const GITHUB_LATEST_RELEASE_API: &str =
     "https://api.github.com/repos/wm94i/Work_Review/releases/latest";
 const GITHUB_LATEST_RELEASE_PAGE: &str = "https://github.com/wm94i/Work_Review/releases/latest";
 const UPDATER_JSON_ENDPOINTS: &[&str] = &[
-    "https://ghproxy.cn/https://github.com/wm94i/Work_Review/releases/latest/download/updater.json",
-    "https://ghp.ci/https://github.com/wm94i/Work_Review/releases/latest/download/updater.json",
+    "https://ghproxy.cn/https://github.com/wm94i/Work_Review/releases/latest/download/updater-ghproxy.json",
+    "https://ghp.ci/https://github.com/wm94i/Work_Review/releases/latest/download/updater-ghp.json",
     "https://github.com/wm94i/Work_Review/releases/latest/download/updater.json",
 ];
 const DEFAULT_UPDATE_CHECK_INTERVAL_HOURS: u64 = 24;
@@ -35,6 +40,32 @@ pub struct MemoryAnswer {
     pub references: Vec<MemorySearchItem>,
     pub used_ai: bool,
     pub model_name: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AssistantAnswer {
+    pub answer: String,
+    pub references: Vec<MemorySearchItem>,
+    pub used_ai: bool,
+    pub model_name: Option<String>,
+    pub tool_labels: Vec<String>,
+    pub cards: Vec<AssistantCard>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AssistantChatMessage {
+    pub role: String,
+    pub content: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AssistantCard {
+    pub kind: String,
+    pub title: String,
+    pub content: serde_json::Value,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -124,6 +155,85 @@ fn compare_versions(current: &str, latest: &str) -> Ordering {
 
 fn is_text_model_available(model_config: &ModelConfig) -> bool {
     !model_config.endpoint.trim().is_empty() && !model_config.model.trim().is_empty()
+}
+
+/// 从问题中提取时间范围关键词，返回 (date_from, date_to)
+fn parse_temporal_range(question: &str) -> (Option<String>, Option<String>) {
+    use chrono::{Datelike, Local};
+
+    let normalized = question.trim().to_lowercase();
+    let today = Local::now().date_naive();
+    let fmt = |d: chrono::NaiveDate| d.format("%Y-%m-%d").to_string();
+
+    // 今天/今日
+    if normalized.contains("今天") || normalized.contains("今日") {
+        let d = fmt(today);
+        return (Some(d.clone()), Some(d));
+    }
+
+    // 昨天/昨日
+    if normalized.contains("昨天") || normalized.contains("昨日") {
+        let d = fmt(today - chrono::Duration::days(1));
+        return (Some(d.clone()), Some(d));
+    }
+
+    // 前天
+    if normalized.contains("前天") {
+        let d = fmt(today - chrono::Duration::days(2));
+        return (Some(d.clone()), Some(d));
+    }
+
+    // 最近N天/近N天/过去N天 — 用 regex 提取数字
+    if let Ok(re) = regex::Regex::new(r"(?:最近|近|过去)\s*(\d+)\s*天") {
+        if let Some(caps) = re.captures(&normalized) {
+            if let Ok(n) = caps[1].parse::<i64>() {
+                return (
+                    Some(fmt(today - chrono::Duration::days(n))),
+                    Some(fmt(today)),
+                );
+            }
+        }
+    }
+
+    // 含"最近"但无数字 → 默认 7 天
+    if normalized.contains("最近") {
+        return (
+            Some(fmt(today - chrono::Duration::days(7))),
+            Some(fmt(today)),
+        );
+    }
+
+    // 本周/这周
+    if normalized.contains("本周") || normalized.contains("这周") {
+        let wd = today.weekday().num_days_from_monday() as i64;
+        let monday = today - chrono::Duration::days(wd);
+        return (Some(fmt(monday)), Some(fmt(today)));
+    }
+
+    // 上周/上一周
+    if normalized.contains("上周") || normalized.contains("上一周") {
+        let wd = today.weekday().num_days_from_monday() as i64;
+        let this_monday = today - chrono::Duration::days(wd);
+        let last_monday = this_monday - chrono::Duration::days(7);
+        let last_sunday = this_monday - chrono::Duration::days(1);
+        return (Some(fmt(last_monday)), Some(fmt(last_sunday)));
+    }
+
+    // 本月/这个月
+    if normalized.contains("本月") || normalized.contains("这个月") {
+        let first = today.with_day(1).unwrap_or(today);
+        return (Some(fmt(first)), Some(fmt(today)));
+    }
+
+    // 上月/上个月
+    if normalized.contains("上月") || normalized.contains("上个月") {
+        let first_this = today.with_day(1).unwrap_or(today);
+        let last_day_prev = first_this - chrono::Duration::days(1);
+        let first_prev = last_day_prev.with_day(1).unwrap_or(last_day_prev);
+        return (Some(fmt(first_prev)), Some(fmt(last_day_prev)));
+    }
+
+    (None, None)
 }
 
 fn format_memory_references(references: &[MemorySearchItem]) -> String {
@@ -218,10 +328,483 @@ fn build_fallback_memory_answer(question: &str, references: &[MemorySearchItem])
     answer
 }
 
-async fn generate_memory_answer_with_model(
-    model_config: &ModelConfig,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AssistantTool {
+    Memory,
+    Sessions,
+    Intents,
+    Review,
+    Todos,
+}
+
+impl AssistantTool {
+    fn label(&self) -> &'static str {
+        match self {
+            AssistantTool::Memory => "记忆检索",
+            AssistantTool::Sessions => "Session 聚合",
+            AssistantTool::Intents => "意图识别",
+            AssistantTool::Review => "周报复盘",
+            AssistantTool::Todos => "待办提取",
+        }
+    }
+}
+
+fn detect_assistant_tools(question: &str) -> Vec<AssistantTool> {
+    let normalized = question.trim().to_lowercase();
+    if normalized.is_empty() {
+        return vec![AssistantTool::Memory];
+    }
+
+    let mut tools = Vec::new();
+
+    let mentions_review = [
+        "周报", "复盘", "回顾", "总结", "汇总", "本周", "上周", "这周",
+    ]
+    .iter()
+    .any(|pattern| normalized.contains(pattern));
+    let mentions_todos = ["待办", "todo", "跟进", "后续", "下一步", "next step"]
+        .iter()
+        .any(|pattern| normalized.contains(pattern));
+    let mentions_sessions = ["session", "工作段", "时间段", "时段", "连续", "切换"]
+        .iter()
+        .any(|pattern| normalized.contains(pattern));
+    let mentions_intents = ["意图", "主要在做", "重心", "方向", "类型", "主要工作"]
+        .iter()
+        .any(|pattern| normalized.contains(pattern));
+    let mentions_memory = [
+        "什么时候",
+        "哪里",
+        "哪个",
+        "谁",
+        "记录",
+        "ocr",
+        "网页",
+        "链接",
+        "url",
+    ]
+    .iter()
+    .any(|pattern| normalized.contains(pattern));
+
+    if mentions_review {
+        tools.push(AssistantTool::Review);
+        tools.push(AssistantTool::Intents);
+    }
+    if mentions_todos {
+        tools.push(AssistantTool::Todos);
+    }
+    if mentions_sessions {
+        tools.push(AssistantTool::Sessions);
+    }
+    if mentions_intents {
+        tools.push(AssistantTool::Intents);
+    }
+    if mentions_memory || tools.is_empty() {
+        tools.push(AssistantTool::Memory);
+    }
+
+    if normalized.contains("主要做了什么") || normalized.contains("最近在做什么") {
+        if !tools.contains(&AssistantTool::Review) {
+            tools.push(AssistantTool::Review);
+        }
+        if !tools.contains(&AssistantTool::Memory) {
+            tools.push(AssistantTool::Memory);
+        }
+    }
+
+    let mut unique = Vec::new();
+    for tool in tools {
+        if !unique.contains(&tool) {
+            unique.push(tool);
+        }
+    }
+    unique
+}
+
+fn build_history_context(history: &[AssistantChatMessage]) -> String {
+    history
+        .iter()
+        .rev()
+        .take(6)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .map(|message| format!("{}: {}", message.role, message.content.trim()))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn build_contextual_query(question: &str, history: &[AssistantChatMessage]) -> String {
+    let trimmed = question.trim();
+    if trimmed.chars().count() >= 8 {
+        return trimmed.to_string();
+    }
+
+    let previous_user = history
+        .iter()
+        .rev()
+        .find(|message| message.role == "user" && message.content.trim() != trimmed)
+        .map(|message| message.content.trim().to_string());
+
+    if let Some(previous_user) = previous_user {
+        format!("{previous_user} {trimmed}")
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn detect_assistant_tools_with_history(
+    question: &str,
+    history: &[AssistantChatMessage],
+) -> Vec<AssistantTool> {
+    // 阶段 1：先对当前问题单独匹配
+    let current_tools = detect_assistant_tools(question);
+
+    // 如果当前问题已命中具体工具（不只是默认的 Memory），直接用，避免历史污染
+    let only_default_memory =
+        current_tools.len() == 1 && current_tools[0] == AssistantTool::Memory;
+    if !only_default_memory {
+        return current_tools;
+    }
+
+    // 阶段 2：当前问题什么都没命中（只有默认 Memory）→ 拼接历史再匹配，作为上下文补充
+    if history.is_empty() {
+        return current_tools;
+    }
+
+    let mut context = build_history_context(history);
+    if !context.is_empty() {
+        context.push('\n');
+    }
+    context.push_str(question);
+    detect_assistant_tools(&context)
+}
+
+fn summarize_sessions_for_prompt(sessions: &[WorkSession]) -> String {
+    if sessions.is_empty() {
+        return "无 session 数据".to_string();
+    }
+
+    sessions
+        .iter()
+        .take(6)
+        .enumerate()
+        .map(|(index, session)| {
+            format!(
+                "{}. {} {}-{}，{}，主应用：{}，意图：{}，标题：{}",
+                index + 1,
+                session.date,
+                session.start_timestamp,
+                session.end_timestamp,
+                crate::analysis::format_duration(session.duration),
+                session.dominant_app,
+                session.intent_label,
+                session.title
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn summarize_intents_for_prompt(result: &IntentAnalysisResult) -> String {
+    if result.summary.is_empty() {
+        return "无意图识别结果".to_string();
+    }
+
+    result
+        .summary
+        .iter()
+        .take(6)
+        .map(|item| {
+            format!(
+                "- {}：{}，{} 段",
+                item.label,
+                crate::analysis::format_duration(item.duration),
+                item.session_count
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn summarize_todos_for_prompt(result: &TodoExtractionResult) -> String {
+    if result.items.is_empty() {
+        return "无待办提取结果".to_string();
+    }
+
+    result
+        .items
+        .iter()
+        .take(8)
+        .map(|item| {
+            format!(
+                "- {}（{}，{}，置信度 {}，{}）",
+                item.title, item.date, item.source_app, item.confidence, item.reason
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn build_assistant_prompt(
+    question: &str,
+    history: &[AssistantChatMessage],
+    date_from: Option<&str>,
+    date_to: Option<&str>,
+    references: &[MemorySearchItem],
+    sessions: Option<&[WorkSession]>,
+    intents: Option<&IntentAnalysisResult>,
+    review: Option<&WeeklyReviewResult>,
+    todos: Option<&TodoExtractionResult>,
+) -> String {
+    let range = match (date_from, date_to) {
+        (Some(start), Some(end)) if start == end => format!("{start} 当天"),
+        (Some(start), Some(end)) => format!("{start} 到 {end}"),
+        (Some(start), None) => format!("{start} 之后"),
+        (None, Some(end)) => format!("{end} 之前"),
+        (None, None) => "全部可用记录".to_string(),
+    };
+
+    let mut prompt = format!(
+        "用户问题：{question}\n数据时间范围：{range}（以下所有数据均在此范围内，超出范围的信息不可用）\n\n请直接回答用户的问题。严格基于以下数据，不要编造未出现的事实。证据不足时明确说明。\n"
+    );
+
+    let recent_history: Vec<_> = history.iter().rev().take(4).collect::<Vec<_>>();
+    if !recent_history.is_empty() {
+        prompt.push_str("\n【对话上下文】\n");
+        for msg in recent_history.into_iter().rev() {
+            let role_label = if msg.role == "user" { "用户" } else { "助手" };
+            let content = msg.content.trim();
+            let short = if content.chars().count() > 200 {
+                format!("{}…", content.chars().take(200).collect::<String>())
+            } else {
+                content.to_string()
+            };
+            prompt.push_str(&format!("{role_label}：{short}\n"));
+        }
+    }
+
+    if !references.is_empty() {
+        prompt.push_str("\n【相关记忆】\n");
+        prompt.push_str(&format_memory_references(references));
+        prompt.push('\n');
+    }
+
+    if let Some(sessions) = sessions {
+        prompt.push_str("\n【工作段】\n");
+        prompt.push_str(&summarize_sessions_for_prompt(sessions));
+        prompt.push('\n');
+    }
+
+    if let Some(intents) = intents {
+        prompt.push_str("\n【意图分布】\n");
+        prompt.push_str(&summarize_intents_for_prompt(intents));
+        prompt.push('\n');
+    }
+
+    if let Some(review) = review {
+        prompt.push_str("\n【阶段复盘】\n");
+        prompt.push_str(&review.markdown);
+        prompt.push('\n');
+    }
+
+    if let Some(todos) = todos {
+        prompt.push_str("\n【待办事项】\n");
+        prompt.push_str(&summarize_todos_for_prompt(todos));
+        prompt.push('\n');
+    }
+
+    prompt.push_str(
+        "\n输出要求：\n1. 用中文回答，直接回应用户的问题，不要泛泛而谈。\n2. 使用清晰的 Markdown 排版（标题、列表、加粗等）。\n3. 先给结论，再给依据或关键发现。\n4. 列举时使用无序列表，一行一条。\n5. 不要提及内部分析工具名称。\n6. 不要虚构日期、任务或结果。\n",
+    );
+
+    prompt
+}
+
+fn build_fallback_assistant_answer(
     question: &str,
     references: &[MemorySearchItem],
+    sessions: Option<&[WorkSession]>,
+    intents: Option<&IntentAnalysisResult>,
+    review: Option<&WeeklyReviewResult>,
+    todos: Option<&TodoExtractionResult>,
+    _tool_labels: &[String],
+) -> String {
+    let has_review = review.is_some();
+    let has_intents = intents.map_or(false, |i| !i.summary.is_empty());
+    let has_todos = todos.map_or(false, |t| !t.items.is_empty());
+    let has_sessions = sessions.map_or(false, |s| !s.is_empty());
+    let has_refs = !references.is_empty();
+
+    if !has_review && !has_intents && !has_todos && !has_sessions && !has_refs {
+        return format!(
+            "未找到和\"{question}\"相关的记录。\n\n可尝试换一个关键词，或调整日期范围后再试。"
+        );
+    }
+
+    let mut answer = String::new();
+
+    if has_review || has_intents {
+        answer.push_str(&format!("## 关于\"{question}\"\n\n"));
+
+        if let Some(review) = review {
+            answer.push_str(&review.markdown);
+            answer.push_str("\n\n");
+        }
+
+        if let Some(intents) = intents {
+            if !intents.summary.is_empty() {
+                answer.push_str("## 主要工作方向\n\n");
+                for item in intents.summary.iter().take(5) {
+                    answer.push_str(&format!(
+                        "- **{}**：{}，{} 段\n",
+                        item.label,
+                        crate::analysis::format_duration(item.duration),
+                        item.session_count
+                    ));
+                }
+                answer.push('\n');
+            }
+        }
+    } else if has_todos {
+        answer.push_str("## 待跟进事项\n\n");
+
+        if let Some(todos) = todos {
+            for item in todos.items.iter().take(8) {
+                answer.push_str(&format!(
+                    "- **{}**（{}，{}）\n",
+                    item.title, item.date, item.reason
+                ));
+            }
+            answer.push('\n');
+        }
+    } else if has_sessions {
+        answer.push_str("## 工作时间线\n\n");
+
+        if let Some(sessions) = sessions {
+            for session in sessions.iter().take(5) {
+                answer.push_str(&format!(
+                    "- **{}**：{}，主要使用 {}（{}）\n",
+                    session.title,
+                    crate::analysis::format_duration(session.duration),
+                    session.dominant_app,
+                    session.intent_label
+                ));
+            }
+            answer.push('\n');
+        }
+    } else {
+        answer.push_str(&format!("## 关于\"{question}\"的相关记录\n\n"));
+    }
+
+    if has_refs {
+        if has_review || has_intents || has_todos || has_sessions {
+            answer.push_str("## 相关记录\n\n");
+        }
+        for item in references.iter().take(5) {
+            let mut line = format!("- **{}**（{}）", item.title, item.date);
+            if let Some(app) = &item.app_name {
+                if !app.is_empty() {
+                    line.push_str(&format!("，{app}"));
+                }
+            }
+            if !item.excerpt.is_empty() {
+                let short_excerpt: String = item.excerpt.chars().take(80).collect();
+                line.push_str(&format!("：{short_excerpt}"));
+                if item.excerpt.chars().count() > 80 {
+                    line.push('…');
+                }
+            }
+            line.push('\n');
+            answer.push_str(&line);
+        }
+    }
+
+    answer.push_str("\n> 当前为基础回答模式，如需更精准的分析归纳，可切换到 AI 增强模式。");
+    answer
+}
+
+fn build_assistant_cards(
+    sessions: Option<&[WorkSession]>,
+    intents: Option<&IntentAnalysisResult>,
+    review: Option<&WeeklyReviewResult>,
+    todos: Option<&TodoExtractionResult>,
+) -> Vec<AssistantCard> {
+    let mut cards = Vec::new();
+
+    if let Some(review) = review {
+        cards.push(AssistantCard {
+            kind: "review".to_string(),
+            title: "阶段复盘".to_string(),
+            content: serde_json::json!({
+                "totalDuration": review.total_duration,
+                "activeDays": review.active_days,
+                "sessionCount": review.session_count,
+                "deepWorkSessions": review.deep_work_sessions,
+                "highlights": review.highlights,
+                "risks": review.risks,
+            }),
+        });
+    }
+
+    if let Some(intents) = intents {
+        if !intents.summary.is_empty() {
+            cards.push(AssistantCard {
+                kind: "intents".to_string(),
+                title: "意图分布".to_string(),
+                content: serde_json::json!({
+                    "items": intents.summary.iter().take(6).map(|item| serde_json::json!({
+                        "label": item.label,
+                        "duration": item.duration,
+                        "sessionCount": item.session_count,
+                    })).collect::<Vec<_>>(),
+                }),
+            });
+        }
+    }
+
+    if let Some(todos) = todos {
+        if !todos.items.is_empty() {
+            cards.push(AssistantCard {
+                kind: "todos".to_string(),
+                title: "待办候选".to_string(),
+                content: serde_json::json!({
+                    "items": todos.items.iter().take(8).map(|item| serde_json::json!({
+                        "title": item.title,
+                        "date": item.date,
+                        "sourceApp": item.source_app,
+                        "confidence": item.confidence,
+                        "reason": item.reason,
+                    })).collect::<Vec<_>>(),
+                }),
+            });
+        }
+    }
+
+    if let Some(sessions) = sessions {
+        if !sessions.is_empty() {
+            cards.push(AssistantCard {
+                kind: "sessions".to_string(),
+                title: "代表性 Session".to_string(),
+                content: serde_json::json!({
+                    "items": sessions.iter().take(5).map(|session| serde_json::json!({
+                        "title": session.title,
+                        "date": session.date,
+                        "duration": session.duration,
+                        "dominantApp": session.dominant_app,
+                        "intentLabel": session.intent_label,
+                    })).collect::<Vec<_>>(),
+                }),
+            });
+        }
+    }
+
+    cards
+}
+
+async fn generate_text_answer_with_model(
+    model_config: &ModelConfig,
+    system_prompt: &str,
+    prompt: &str,
 ) -> Result<String, AppError> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(60))
@@ -229,15 +812,22 @@ async fn generate_memory_answer_with_model(
         .build()
         .map_err(|e| AppError::Unknown(e.to_string()))?;
 
-    let prompt = build_memory_answer_prompt(question, references);
-
     match model_config.provider {
         AiProvider::Ollama => {
             let response = client
-                .post(format!("{}/api/generate", model_config.endpoint))
+                .post(format!("{}/api/chat", model_config.endpoint))
                 .json(&serde_json::json!({
                     "model": model_config.model,
-                    "prompt": prompt,
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": system_prompt
+                        },
+                        {
+                            "role": "user",
+                            "content": prompt
+                        }
+                    ],
                     "stream": false
                 }))
                 .send()
@@ -251,7 +841,11 @@ async fn generate_memory_answer_with_model(
             }
 
             let result: serde_json::Value = response.json().await?;
-            let answer = result["response"].as_str().unwrap_or("").trim().to_string();
+            let answer = result["message"]["content"]
+                .as_str()
+                .unwrap_or("")
+                .trim()
+                .to_string();
             if answer.is_empty() {
                 return Err(AppError::Analysis("Ollama 返回空内容".to_string()));
             }
@@ -271,7 +865,7 @@ async fn generate_memory_answer_with_model(
                 .json(&serde_json::json!({
                     "model": model_config.model,
                     "max_tokens": 1600,
-                    "system": "你是一个严谨的个人工作记忆助手，只能基于提供的记录作答，请用中文回答。",
+                    "system": system_prompt,
                     "messages": [
                         {
                             "role": "user",
@@ -284,7 +878,9 @@ async fn generate_memory_answer_with_model(
 
             if !response.status().is_success() {
                 let error_text = response.text().await.unwrap_or_default();
-                return Err(AppError::Analysis(format!("Claude 记忆问答失败: {error_text}")));
+                return Err(AppError::Analysis(format!(
+                    "Claude 记忆问答失败: {error_text}"
+                )));
             }
 
             let result: serde_json::Value = response.json().await?;
@@ -312,7 +908,7 @@ async fn generate_memory_answer_with_model(
                 .json(&serde_json::json!({
                     "contents": [{
                         "parts": [{
-                            "text": format!("你是一个严谨的个人工作记忆助手，只能基于提供的记录作答，请用中文回答。\n\n{}", prompt)
+                            "text": format!("{}\n\n{}", system_prompt, prompt)
                         }]
                     }],
                     "generationConfig": {
@@ -325,7 +921,9 @@ async fn generate_memory_answer_with_model(
 
             if !response.status().is_success() {
                 let error_text = response.text().await.unwrap_or_default();
-                return Err(AppError::Analysis(format!("Gemini 记忆问答失败: {error_text}")));
+                return Err(AppError::Analysis(format!(
+                    "Gemini 记忆问答失败: {error_text}"
+                )));
             }
 
             let result: serde_json::Value = response.json().await?;
@@ -347,7 +945,7 @@ async fn generate_memory_answer_with_model(
                     "messages": [
                         {
                             "role": "system",
-                            "content": "你是一个严谨的个人工作记忆助手，只能基于提供的记录作答，请用中文回答。"
+                            "content": system_prompt
                         },
                         {
                             "role": "user",
@@ -385,6 +983,19 @@ async fn generate_memory_answer_with_model(
             Ok(answer)
         }
     }
+}
+
+async fn generate_memory_answer_with_model(
+    model_config: &ModelConfig,
+    question: &str,
+    references: &[MemorySearchItem],
+) -> Result<String, AppError> {
+    generate_text_answer_with_model(
+        model_config,
+        "你是一个严谨的个人工作记忆助手，只能基于提供的记录作答，请用中文回答。",
+        &build_memory_answer_prompt(question, references),
+    )
+    .await
 }
 
 fn update_settings_path(data_dir: &Path) -> std::path::PathBuf {
@@ -571,73 +1182,17 @@ pub async fn get_timeline(
 ) -> Result<Vec<Activity>, AppError> {
     let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
     let activities = state.database.get_timeline(&date, limit, offset)?;
+    let (ignored_apps, excluded_domains) = collect_privacy_filters(&state);
+    let filtered = filter_activities_by_privacy(activities, &ignored_apps, &excluded_domains);
 
-    // 过滤掉被隐私规则设置为 Ignored 的应用
-    use crate::config::PrivacyLevel;
-    let ignored_apps: Vec<_> = state
-        .config
-        .privacy
-        .app_rules
-        .iter()
-        .filter(|r| r.level == PrivacyLevel::Ignored)
-        .map(|r| r.app_name.to_lowercase())
-        .collect();
-
-    // 获取域名黑名单（提取纯域名）
-    let excluded_domains: Vec<_> = state
-        .config
-        .privacy
-        .excluded_domains
-        .iter()
-        .map(|d| extract_domain(d))
-        .filter(|d| !d.is_empty())
-        .collect();
-
-    let no_app_filter = ignored_apps.is_empty();
-    let no_domain_filter = excluded_domains.is_empty();
-
-    if no_app_filter && no_domain_filter {
-        return Ok(activities);
+    if !ignored_apps.is_empty() || !excluded_domains.is_empty() {
+        log::info!(
+            "隐私过滤: 需过滤应用 {:?}, 域名 {:?}，结果 {} 条",
+            ignored_apps,
+            excluded_domains,
+            filtered.len()
+        );
     }
-
-    log::info!("隐私过滤: 需过滤应用 {ignored_apps:?}, 域名 {excluded_domains:?}");
-    let original_count = activities.len();
-    let filtered: Vec<_> = activities
-        .into_iter()
-        .filter(|activity| {
-            // 检查应用名
-            let app_lower = activity.app_name.to_lowercase();
-            if !no_app_filter
-                && ignored_apps
-                    .iter()
-                    .any(|ignored| app_lower.contains(ignored) || ignored.contains(&app_lower))
-            {
-                log::debug!("过滤掉应用: {}", activity.app_name);
-                return false;
-            }
-
-            // 检查 URL 域名
-            if !no_domain_filter {
-                if let Some(ref url) = activity.browser_url {
-                    let domain = extract_domain(url);
-                    if excluded_domains
-                        .iter()
-                        .any(|excluded| domain.contains(excluded) || excluded.contains(&domain))
-                    {
-                        log::debug!("过滤掉域名: {domain} (URL: {url})");
-                        return false;
-                    }
-                }
-            }
-
-            true
-        })
-        .collect();
-    log::info!(
-        "隐私过滤: 过滤前 {} 条, 过滤后 {} 条",
-        original_count,
-        filtered.len()
-    );
 
     Ok(filtered)
 }
@@ -652,6 +1207,88 @@ fn extract_domain(url: &str) -> String {
         .next()
         .unwrap_or("")
         .to_lowercase()
+}
+
+fn collect_privacy_filters(state: &AppState) -> (Vec<String>, Vec<String>) {
+    use crate::config::PrivacyLevel;
+
+    let ignored_apps = state
+        .config
+        .privacy
+        .app_rules
+        .iter()
+        .filter(|rule| rule.level == PrivacyLevel::Ignored)
+        .map(|rule| rule.app_name.to_lowercase())
+        .collect::<Vec<_>>();
+
+    let excluded_domains = state
+        .config
+        .privacy
+        .excluded_domains
+        .iter()
+        .map(|domain| extract_domain(domain))
+        .filter(|domain| !domain.is_empty())
+        .collect::<Vec<_>>();
+
+    (ignored_apps, excluded_domains)
+}
+
+fn filter_activities_by_privacy(
+    activities: Vec<Activity>,
+    ignored_apps: &[String],
+    excluded_domains: &[String],
+) -> Vec<Activity> {
+    let no_app_filter = ignored_apps.is_empty();
+    let no_domain_filter = excluded_domains.is_empty();
+
+    if no_app_filter && no_domain_filter {
+        return activities;
+    }
+
+    activities
+        .into_iter()
+        .filter(|activity| {
+            let app_lower = activity.app_name.to_lowercase();
+            if !no_app_filter
+                && ignored_apps
+                    .iter()
+                    .any(|ignored| app_lower.contains(ignored) || ignored.contains(&app_lower))
+            {
+                return false;
+            }
+
+            if !no_domain_filter {
+                if let Some(url) = &activity.browser_url {
+                    let domain = extract_domain(url);
+                    if excluded_domains
+                        .iter()
+                        .any(|excluded| domain.contains(excluded) || excluded.contains(&domain))
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            true
+        })
+        .collect()
+}
+
+fn load_filtered_activities_in_range(
+    state: &AppState,
+    date_from: Option<&str>,
+    date_to: Option<&str>,
+    limit: usize,
+) -> Result<Vec<Activity>, AppError> {
+    let activities = state
+        .database
+        .get_activities_in_range(date_from, date_to, limit)?;
+    let (ignored_apps, excluded_domains) = collect_privacy_filters(state);
+    Ok(filter_activities_by_privacy(
+        activities,
+        &ignored_apps,
+        &excluded_domains,
+    ))
 }
 
 /// 获取单个活动（用于刷新详情页，获取最新 OCR 结果）
@@ -730,6 +1367,242 @@ pub async fn ask_memory(
         used_ai: false,
         model_name: None,
     })
+}
+
+/// 统一工作助手
+#[tauri::command]
+pub async fn chat_work_assistant(
+    question: String,
+    history: Option<Vec<AssistantChatMessage>>,
+    model_config: Option<ModelConfig>,
+    date_from: Option<String>,
+    date_to: Option<String>,
+    state: State<'_, Arc<Mutex<AppState>>>,
+) -> Result<AssistantAnswer, AppError> {
+    let trimmed_question = question.trim().to_string();
+    let history = history.unwrap_or_default();
+    if trimmed_question.is_empty() {
+        return Ok(AssistantAnswer {
+            answer: "请输入你想问的问题。".to_string(),
+            references: Vec::new(),
+            used_ai: false,
+            model_name: None,
+            tool_labels: vec!["记忆检索".to_string()],
+            cards: Vec::new(),
+        });
+    }
+
+    // 时间范围：前端传入优先，否则从问题中自动提取
+    let (date_from, date_to) = if date_from.is_some() || date_to.is_some() {
+        (date_from, date_to)
+    } else {
+        let (auto_from, auto_to) = parse_temporal_range(&trimmed_question);
+        (auto_from, auto_to)
+    };
+
+    let tools = detect_assistant_tools_with_history(&trimmed_question, &history);
+    let search_query = build_contextual_query(&trimmed_question, &history);
+    let (references, sessions, intents, review, todos) = {
+        let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
+        let references = state.database.search_memory(
+            &search_query,
+            date_from.as_deref(),
+            date_to.as_deref(),
+            8,
+        )?;
+
+        let needs_activity_data = tools.iter().any(|tool| {
+            matches!(
+                tool,
+                AssistantTool::Sessions
+                    | AssistantTool::Intents
+                    | AssistantTool::Review
+                    | AssistantTool::Todos
+            )
+        });
+
+        let activities = if needs_activity_data {
+            Some(load_filtered_activities_in_range(
+                &state,
+                date_from.as_deref(),
+                date_to.as_deref(),
+                5000,
+            )?)
+        } else {
+            None
+        };
+
+        let sessions = if tools.contains(&AssistantTool::Sessions) {
+            activities.as_ref().map(|items| build_work_sessions(items))
+        } else {
+            None
+        };
+
+        let intents = if tools.contains(&AssistantTool::Intents) {
+            activities.as_ref().map(|items| analyze_intents(items))
+        } else {
+            None
+        };
+
+        let review = if tools.contains(&AssistantTool::Review) {
+            activities
+                .as_ref()
+                .map(|items| build_weekly_review(items, date_from.as_deref(), date_to.as_deref()))
+        } else {
+            None
+        };
+
+        let todos = if tools.contains(&AssistantTool::Todos) {
+            activities.as_ref().map(|items| extract_todos(items))
+        } else {
+            None
+        };
+
+        (references, sessions, intents, review, todos)
+    };
+
+    let tool_labels = tools
+        .iter()
+        .map(|tool| tool.label().to_string())
+        .collect::<Vec<_>>();
+    let cards = build_assistant_cards(
+        sessions.as_deref(),
+        intents.as_ref(),
+        review.as_ref(),
+        todos.as_ref(),
+    );
+
+    // model_config: None = basic template (no AI), Some = AI enhanced
+    if let Some(ref ai_model) = model_config {
+        if is_text_model_available(ai_model) {
+            let prompt = build_assistant_prompt(
+                &trimmed_question,
+                &history,
+                date_from.as_deref(),
+                date_to.as_deref(),
+                &references,
+                sessions.as_deref(),
+                intents.as_ref(),
+                review.as_ref(),
+                todos.as_ref(),
+            );
+
+            let sys = "你是 Work Review 的工作助手。你只能基于给定记录回答。请用中文回答，直接回应用户问题，先给结论再给依据。不要提及内部分析步骤，不要编造不存在的事实。";
+
+            match generate_text_answer_with_model(ai_model, sys, &prompt).await {
+                Ok(answer) => {
+                    return Ok(AssistantAnswer {
+                        answer,
+                        references,
+                        used_ai: true,
+                        model_name: Some(ai_model.model.clone()),
+                        tool_labels,
+                        cards,
+                    });
+                }
+                Err(error) => {
+                    log::warn!("AI generation failed, falling back: {error}");
+                }
+            }
+        }
+    }
+
+    Ok(AssistantAnswer {
+        answer: build_fallback_assistant_answer(
+            &trimmed_question,
+            &references,
+            sessions.as_deref(),
+            intents.as_ref(),
+            review.as_ref(),
+            todos.as_ref(),
+            &tool_labels,
+        ),
+        references,
+        used_ai: false,
+        model_name: None,
+        tool_labels,
+        cards,
+    })
+}
+
+/// 获取连续工作 session 聚合结果
+#[tauri::command]
+pub async fn get_work_sessions(
+    date_from: Option<String>,
+    date_to: Option<String>,
+    limit: Option<u32>,
+    state: State<'_, Arc<Mutex<AppState>>>,
+) -> Result<Vec<WorkSession>, AppError> {
+    let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
+    let activities = load_filtered_activities_in_range(
+        &state,
+        date_from.as_deref(),
+        date_to.as_deref(),
+        limit.unwrap_or(5000) as usize,
+    )?;
+
+    Ok(build_work_sessions(&activities))
+}
+
+/// 基于 session 识别主要工作意图
+#[tauri::command]
+pub async fn recognize_work_intents(
+    date_from: Option<String>,
+    date_to: Option<String>,
+    limit: Option<u32>,
+    state: State<'_, Arc<Mutex<AppState>>>,
+) -> Result<IntentAnalysisResult, AppError> {
+    let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
+    let activities = load_filtered_activities_in_range(
+        &state,
+        date_from.as_deref(),
+        date_to.as_deref(),
+        limit.unwrap_or(5000) as usize,
+    )?;
+
+    Ok(analyze_intents(&activities))
+}
+
+/// 生成周报 / 阶段复盘
+#[tauri::command]
+pub async fn generate_weekly_review(
+    date_from: Option<String>,
+    date_to: Option<String>,
+    limit: Option<u32>,
+    state: State<'_, Arc<Mutex<AppState>>>,
+) -> Result<WeeklyReviewResult, AppError> {
+    let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
+    let activities = load_filtered_activities_in_range(
+        &state,
+        date_from.as_deref(),
+        date_to.as_deref(),
+        limit.unwrap_or(5000) as usize,
+    )?;
+
+    Ok(build_weekly_review(
+        &activities,
+        date_from.as_deref(),
+        date_to.as_deref(),
+    ))
+}
+
+/// 提取待跟进事项
+#[tauri::command]
+pub async fn extract_todo_items(
+    date_from: Option<String>,
+    date_to: Option<String>,
+    limit: Option<u32>,
+    state: State<'_, Arc<Mutex<AppState>>>,
+) -> Result<TodoExtractionResult, AppError> {
+    let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
+    let activities = load_filtered_activities_in_range(
+        &state,
+        date_from.as_deref(),
+        date_to.as_deref(),
+        limit.unwrap_or(5000) as usize,
+    )?;
+
+    Ok(extract_todos(&activities))
 }
 
 /// 生成日报
@@ -2379,8 +3252,7 @@ if ($app -and $app.Path) {{
     [JumboIconExtractor]::Extract($app.Path)
 }}
 "#,
-        ps_candidates,
-        title_hint
+        ps_candidates, title_hint
     );
 
     let output = Command::new("powershell")

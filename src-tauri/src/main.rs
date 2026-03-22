@@ -19,6 +19,7 @@ mod privacy;
 mod screen_lock;
 mod screenshot;
 mod storage;
+mod work_intelligence;
 
 use chrono;
 use config::AppConfig;
@@ -52,20 +53,65 @@ pub struct AppState {
 
 /// 获取数据目录
 fn get_data_dir() -> PathBuf {
-    // 优先使用可执行文件所在目录
-    if let Ok(exe_path) = std::env::current_exe() {
-        if let Some(exe_dir) = exe_path.parent() {
-            let data_dir = exe_dir.join("data");
-            if std::fs::create_dir_all(&data_dir).is_ok() {
-                return data_dir;
-            }
+    let preferred_dir = dirs::data_dir()
+        .map(|d| d.join("work-review"))
+        .unwrap_or_else(|| PathBuf::from("./data"));
+
+    if let Err(error) = std::fs::create_dir_all(&preferred_dir) {
+        log::warn!("创建稳定数据目录失败，回退当前目录: {error}");
+        return PathBuf::from("./data");
+    }
+
+    migrate_legacy_data_dir(&preferred_dir);
+    preferred_dir
+}
+
+fn migrate_legacy_data_dir(target_dir: &PathBuf) {
+    let legacy_dir = match std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(|parent| parent.join("data")))
+    {
+        Some(path) => path,
+        None => return,
+    };
+
+    if legacy_dir == *target_dir || !legacy_dir.exists() {
+        return;
+    }
+
+    let target_has_data = target_dir.join("config.json").exists()
+        || target_dir.join("workreview.db").exists()
+        || target_dir.join("screenshots").exists();
+    if target_has_data {
+        return;
+    }
+
+    if let Err(error) = copy_dir_if_missing(&legacy_dir, target_dir) {
+        log::warn!("迁移旧版数据目录失败: {error}");
+    } else {
+        log::info!("已将旧版数据目录迁移到稳定目录: {:?}", target_dir);
+    }
+}
+
+fn copy_dir_if_missing(from: &std::path::Path, to: &std::path::Path) -> Result<(), std::io::Error> {
+    std::fs::create_dir_all(to)?;
+
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let source_path = entry.path();
+        let target_path = to.join(entry.file_name());
+
+        if source_path.is_dir() {
+            copy_dir_if_missing(&source_path, &target_path)?;
+            continue;
+        }
+
+        if !target_path.exists() {
+            std::fs::copy(&source_path, &target_path)?;
         }
     }
 
-    // 后备：使用用户数据目录
-    dirs::data_dir()
-        .map(|d| d.join("work-review"))
-        .unwrap_or_else(|| PathBuf::from("./data"))
+    Ok(())
 }
 
 /// 浏览器 URL 采集偶发失败时，尝试从最近同窗口标题的活动里恢复 URL。
@@ -152,10 +198,12 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, window: tauri::
         tokio::time::sleep(Duration::from_secs(POLL_INTERVAL_SECS)).await;
 
         // 获取当前活动窗口
+        // 失败原因：Windows 睡眠/待机/UAC 时无前台窗口、macOS 权限不足等
+        // 此时重置计时器，避免累积的时长被错误归属到下一个真实应用
         let mut active_window = match monitor::get_active_window() {
             Ok(w) => w,
-            Err(e) => {
-                log::error!("获取活动窗口失败: {e}");
+            Err(_) => {
+                last_capture_time = std::time::Instant::now();
                 continue;
             }
         };
@@ -190,6 +238,27 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, window: tauri::
             );
             if is_system_transient {
                 log::debug!("跳过系统瞬态进程: {}", active_window.app_name);
+                continue;
+            }
+        }
+
+        // 跳过系统 shell / 锁屏 / 桌面进程，避免睡眠/唤醒时累积虚假时长
+        // 注意 explorer 特殊处理：有窗口标题时是文件管理器，应该记录
+        {
+            let is_sys = monitor::is_system_process(&active_window.app_name);
+            let is_explorer_shell = {
+                let name_lower = active_window.app_name.to_lowercase();
+                let name_trimmed = name_lower.trim_end_matches(".exe");
+                (name_trimmed == "explorer" || name_trimmed == "file explorer")
+                    && active_window.window_title.is_empty()
+            };
+
+            if is_sys || is_explorer_shell {
+                log::debug!(
+                    "跳过系统进程: {} (title={})",
+                    active_window.app_name,
+                    active_window.window_title
+                );
                 continue;
             }
         }
@@ -1284,6 +1353,11 @@ async fn main() {
             commands::get_activity,
             commands::search_memory,
             commands::ask_memory,
+            commands::chat_work_assistant,
+            commands::get_work_sessions,
+            commands::recognize_work_intents,
+            commands::generate_weekly_review,
+            commands::extract_todo_items,
             commands::clear_old_activities,
             commands::get_ocr_log,
             commands::is_screen_locked,
