@@ -30,20 +30,19 @@
 
   // 响应式图标加载：stats 变化时自动触发
   $: if (stats) {
-    const iconEntries = [];
-    if (stats.browser_usage) {
-      stats.browser_usage.forEach(b => iconEntries.push({
+    if (stats.browser_usage?.length) {
+      preloadAppIcons(stats.browser_usage.map(b => ({
         appName: b.browser_name,
         executablePath: b.executable_path,
-      }));
+      })), invoke, { priority: true });
     }
-    if (stats.app_usage) {
-      stats.app_usage.slice(0, 10).forEach(a => iconEntries.push({
+
+    if (stats.app_usage?.length) {
+      preloadAppIcons(stats.app_usage.slice(0, 10).map(a => ({
         appName: a.app_name,
         executablePath: a.executable_path,
-      }));
+      })), invoke);
     }
-    preloadAppIcons(iconEntries, invoke);
   }
 
   function formatDuration(seconds) {
@@ -299,8 +298,8 @@
     <!-- 弹窗头部 -->
       <div class="flex items-center justify-between p-5 border-b border-slate-200 dark:border-slate-700 bg-gradient-to-r from-slate-50 to-white dark:from-slate-800 dark:to-slate-900">
         <div class="flex items-center gap-3">
-        {#if getAppIconSrc(selectedBrowser.browser_name)}
-          <img src={getAppIconSrc(selectedBrowser.browser_name)} alt="" class="w-8 h-8 rounded-lg object-cover" />
+        {#if getAppIconSrc(selectedBrowser.browser_name, selectedBrowser.executable_path)}
+          <img src={getAppIconSrc(selectedBrowser.browser_name, selectedBrowser.executable_path)} alt="" class="w-8 h-8 rounded-lg object-cover" />
         {:else}
           <span class="text-3xl">🌐</span>
         {/if}

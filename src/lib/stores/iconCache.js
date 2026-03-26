@@ -6,9 +6,14 @@ import { writable } from 'svelte/store';
 const _iconCache = {};
 const _pendingRequests = {};
 const _cacheKeys = [];
+const _requestQueue = [];
 const MAX_ICON_CACHE = 120;
+const MAX_PERSISTED_ICON_CACHE = 36;
+const MAX_CONCURRENT_ICON_REQUESTS = 3;
 const FAILED_ICON_RETRY_MS = 30 * 1000;
+const STORAGE_KEY = 'work-review-app-icon-cache-v1';
 const _failedAt = {};
+let _activeRequestCount = 0;
 
 function normalizeIconRequest(entry) {
     if (!entry) return { appName: '', executablePath: '' };
@@ -24,6 +29,35 @@ function normalizeIconRequest(entry) {
 export function getIconCacheKey(entry) {
     const { appName, executablePath } = normalizeIconRequest(entry);
     return executablePath ? `${appName}::${executablePath}` : appName;
+}
+
+function loadPersistentIconCache() {
+    if (typeof window === 'undefined') {
+        return;
+    }
+
+    try {
+        const raw = window.localStorage.getItem(STORAGE_KEY);
+        if (!raw) {
+            return;
+        }
+
+        const parsed = JSON.parse(raw);
+        const items = Array.isArray(parsed?.items) ? parsed.items : [];
+        for (const item of items) {
+            if (!item || typeof item.key !== 'string' || typeof item.value !== 'string') {
+                continue;
+            }
+            if (item.value.length <= 100 || _iconCache[item.key] !== undefined) {
+                continue;
+            }
+
+            _iconCache[item.key] = item.value;
+            _cacheKeys.push(item.key);
+        }
+    } catch (error) {
+        console.warn('加载应用图标缓存失败:', error);
+    }
 }
 
 function touchCacheKey(cacheKey) {
@@ -43,11 +77,79 @@ function pruneCache() {
     }
 }
 
+function persistIconCache() {
+    if (typeof window === 'undefined') {
+        return;
+    }
+
+    try {
+        const items = _cacheKeys
+            .slice(-MAX_PERSISTED_ICON_CACHE)
+            .map((key) => ({ key, value: _iconCache[key] }))
+            .filter((item) => typeof item.value === 'string' && item.value.length > 100);
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ items }));
+    } catch (error) {
+        console.warn('保存应用图标缓存失败:', error);
+    }
+}
+
+loadPersistentIconCache();
+pruneCache();
+
 // 响应式 store，通知 Svelte 更新 UI
-export const appIconStore = writable({});
+export const appIconStore = writable({ ..._iconCache });
+
+function updateIconStore() {
+    appIconStore.set({ ..._iconCache });
+}
+
+function runNextIconRequest() {
+    while (_activeRequestCount < MAX_CONCURRENT_ICON_REQUESTS && _requestQueue.length > 0) {
+        const next = _requestQueue.shift();
+        if (!next) {
+            return;
+        }
+
+        _activeRequestCount += 1;
+
+        void (async () => {
+            const { cacheKey, appName, executablePath, invoke } = next;
+
+            try {
+                const base64 = await invoke('get_app_icon', {
+                    appName,
+                    executablePath: executablePath || null,
+                });
+
+                if (base64 && base64.length > 100) {
+                    _iconCache[cacheKey] = base64;
+                    delete _failedAt[cacheKey];
+                } else {
+                    _iconCache[cacheKey] = null;
+                    _failedAt[cacheKey] = Date.now();
+                }
+
+                touchCacheKey(cacheKey);
+                pruneCache();
+                persistIconCache();
+            } catch {
+                _iconCache[cacheKey] = null;
+                _failedAt[cacheKey] = Date.now();
+                touchCacheKey(cacheKey);
+                pruneCache();
+                persistIconCache();
+            } finally {
+                delete _pendingRequests[cacheKey];
+                _activeRequestCount -= 1;
+                updateIconStore();
+                runNextIconRequest();
+            }
+        })();
+    }
+}
 
 // 加载指定应用的图标
-export async function loadAppIcon(entry, invoke) {
+export function loadAppIcon(entry, invoke, options = {}) {
     const { appName, executablePath } = normalizeIconRequest(entry);
     if (!appName) return;
     const cacheKey = getIconCacheKey({ appName, executablePath });
@@ -65,36 +167,26 @@ export async function loadAppIcon(entry, invoke) {
         }
     }
 
-    // 避免同一应用并发请求
+    // 避免同一应用重复排队或并发请求
     if (_pendingRequests[cacheKey]) return;
     _pendingRequests[cacheKey] = true;
 
-    try {
-        const base64 = await invoke('get_app_icon', { appName, executablePath: executablePath || null });
-        if (base64 && base64.length > 100) {
-            _iconCache[cacheKey] = base64;
-            delete _failedAt[cacheKey];
-        } else {
-            _iconCache[cacheKey] = null;
-            _failedAt[cacheKey] = Date.now();
-        }
-        touchCacheKey(cacheKey);
-        pruneCache();
-    } catch {
-        _iconCache[cacheKey] = null;
-        _failedAt[cacheKey] = Date.now();
-        touchCacheKey(cacheKey);
-        pruneCache();
-    } finally {
-        delete _pendingRequests[cacheKey];
-        // 更新 store 触发 UI 重新渲染
-        appIconStore.set({ ..._iconCache });
+    const queueItem = { cacheKey, appName, executablePath, invoke };
+    if (options.priority) {
+        _requestQueue.unshift(queueItem);
+    } else {
+        _requestQueue.push(queueItem);
     }
+
+    runNextIconRequest();
 }
 
 // 批量预加载
-export function preloadAppIcons(entries, invoke) {
-    entries.forEach(entry => loadAppIcon(entry, invoke));
+export function preloadAppIcons(entries, invoke, options = {}) {
+    const normalizedEntries = Array.isArray(entries) ? entries.filter(Boolean) : [];
+    const queueEntries = options.priority ? normalizedEntries.slice().reverse() : normalizedEntries;
+
+    queueEntries.forEach((entry) => loadAppIcon(entry, invoke, options));
 }
 
 // 获取已缓存的图标（同步）

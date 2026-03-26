@@ -39,6 +39,34 @@ use tauri::{AppHandle, Emitter, Manager};
 // 全局 AppHandle，用于在 macOS Dock 点击时恢复窗口
 static APP_HANDLE: OnceCell<AppHandle> = OnceCell::new();
 
+#[cfg(target_os = "windows")]
+fn build_windows_window_icon() -> Option<tauri::image::Image<'static>> {
+    match image::load_from_memory_with_format(
+        include_bytes!("../icons/windows-icon.png"),
+        image::ImageFormat::Png,
+    ) {
+        Ok(decoded) => {
+            let decoded = if decoded.width() > 256 || decoded.height() > 256 {
+                decoded.resize_exact(256, 256, image::imageops::FilterType::Lanczos3)
+            } else {
+                decoded
+            };
+
+            let rgba = decoded.to_rgba8();
+            let (width, height) = rgba.dimensions();
+            Some(tauri::image::Image::new_owned(
+                rgba.into_raw(),
+                width,
+                height,
+            ))
+        }
+        Err(e) => {
+            log::warn!("加载 Windows 专用窗口图标失败，回退默认图标: {e}");
+            None
+        }
+    }
+}
+
 fn build_tray_icon(app: &tauri::App) -> tauri::image::Image<'static> {
     #[cfg(target_os = "macos")]
     {
@@ -1301,6 +1329,13 @@ async fn main() {
         })
         .setup(|app| {
             let window = app.get_webview_window("main").unwrap();
+
+            #[cfg(target_os = "windows")]
+            if let Some(icon) = build_windows_window_icon() {
+                if let Err(e) = window.set_icon(icon) {
+                    log::warn!("设置 Windows 主窗口图标失败，继续使用默认图标: {e}");
+                }
+            }
 
             // macOS 原生标题栏配置
             #[cfg(target_os = "macos")]

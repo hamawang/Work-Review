@@ -15,6 +15,7 @@
   import { listen } from '@tauri-apps/api/event';
   import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
   import { cache, getLocalDate } from './lib/stores/cache.js';
+  import { preloadAppIcons } from './lib/stores/iconCache.js';
   import { runUpdateFlow } from './lib/utils/updater.js';
 
   const appWindow = getCurrentWebviewWindow();
@@ -45,7 +46,26 @@
     // 并行预加载：概览、时间线(今天)、日报(今天)
     Promise.all([
       // 1. 概览
-      invoke('get_today_stats').then(stats => cache.setOverview(stats)),
+      invoke('get_today_stats').then(stats => {
+        cache.setOverview(stats);
+
+        preloadAppIcons(
+          (stats?.browser_usage || []).map((browser) => ({
+            appName: browser.browser_name,
+            executablePath: browser.executable_path,
+          })),
+          invoke,
+          { priority: true }
+        );
+
+        preloadAppIcons(
+          (stats?.app_usage || []).slice(0, 6).map((app) => ({
+            appName: app.app_name,
+            executablePath: app.executable_path,
+          })),
+          invoke
+        );
+      }),
       // 2. 时间线 (今天) - 仅预加载前 20 条
       Promise.all([
         invoke('get_timeline', { date: today, limit: 20, offset: 0 }),
@@ -259,6 +279,16 @@
 
         // 3. 发射自定义事件，通知当前页面实时更新
         window.dispatchEvent(new CustomEvent('activity-added', { detail: event.payload }));
+
+        // 4. 抢先预热当前应用图标，浏览器记录优先级更高
+        preloadAppIcons(
+          [{
+            appName: event.payload?.app_name,
+            executablePath: event.payload?.executable_path,
+          }],
+          invoke,
+          { priority: Boolean(event.payload?.browser_url) }
+        );
       });
 
       cleanup = () => {

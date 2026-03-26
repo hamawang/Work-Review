@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.23] - 2026-03-26
+
+### 优化
+- 清理构建脚本与配置冗余，统一前端构建入口为标准 Vite 命令，消除本地与 CI 构建行为不一致的隐患。
+- 版本号同步更新，确保 package.json、Cargo.toml 与 tauri.conf.json 三处版本一致。
+
 ## [1.0.22] - 2026-03-26
 
 ### 修复

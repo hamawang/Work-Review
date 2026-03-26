@@ -447,14 +447,19 @@ impl Default for AppConfig {
 }
 
 impl AppConfig {
+    /// 规范化配置，兼容旧字段并补齐助手可用的文本模型档案
+    pub fn normalize(&mut self) {
+        self.migrate_legacy_config();
+        self.sync_text_model_profiles();
+    }
+
     /// 从文件加载配置
     pub fn load(path: &Path) -> Result<Self> {
         if path.exists() {
             let content = std::fs::read_to_string(path)?;
             let mut config: AppConfig = serde_json::from_str(&content)?;
 
-            // 迁移旧版配置到新结构
-            config.migrate_legacy_config();
+            config.normalize();
 
             Ok(config)
         } else {
@@ -506,17 +511,7 @@ impl AppConfig {
             self.background_opacity = 0.25;
         }
 
-        // 为现有单模型配置自动补一份可复用档案，便于助手页直接切换
-        if self.text_model_profiles.is_empty() && is_model_configured(&self.text_model) {
-            self.text_model_profiles.push(TextModelProfile {
-                id: "default-text-model".to_string(),
-                name: default_profile_name(&self.text_model),
-                model_config: self.text_model.clone(),
-                test_status: default_connection_status(),
-                last_tested_at: None,
-                last_test_message: None,
-            });
-        }
+        self.sync_text_model_profiles();
     }
 
     /// 获取文本模型端点
@@ -528,10 +523,57 @@ impl AppConfig {
     pub fn get_vision_endpoint(&self) -> &str {
         &self.vision_model.endpoint
     }
+
+    fn sync_text_model_profiles(&mut self) {
+        if !is_model_configured(&self.text_model) {
+            return;
+        }
+
+        let default_profile_id = "default-text-model";
+        if let Some(profile) = self
+            .text_model_profiles
+            .iter_mut()
+            .find(|profile| profile.id == default_profile_id)
+        {
+            profile.name = default_profile_name(&self.text_model);
+            profile.model_config = self.text_model.clone();
+            if profile.test_status.trim().is_empty() {
+                profile.test_status = default_connection_status();
+            }
+            return;
+        }
+
+        if self
+            .text_model_profiles
+            .iter()
+            .any(|profile| same_model_config(&profile.model_config, &self.text_model))
+        {
+            return;
+        }
+
+        self.text_model_profiles.insert(
+            0,
+            TextModelProfile {
+                id: default_profile_id.to_string(),
+                name: default_profile_name(&self.text_model),
+                model_config: self.text_model.clone(),
+                test_status: default_connection_status(),
+                last_tested_at: None,
+                last_test_message: None,
+            },
+        );
+    }
 }
 
 fn is_model_configured(model_config: &ModelConfig) -> bool {
     !model_config.endpoint.trim().is_empty() && !model_config.model.trim().is_empty()
+}
+
+fn same_model_config(left: &ModelConfig, right: &ModelConfig) -> bool {
+    left.provider == right.provider
+        && left.endpoint.trim() == right.endpoint.trim()
+        && left.model.trim() == right.model.trim()
+        && left.api_key.as_deref().unwrap_or("").trim() == right.api_key.as_deref().unwrap_or("").trim()
 }
 
 fn default_profile_name(model_config: &ModelConfig) -> String {

@@ -1977,10 +1977,12 @@ pub async fn get_config(state: State<'_, Arc<Mutex<AppState>>>) -> Result<AppCon
 /// 保存配置
 #[tauri::command]
 pub async fn save_config(
-    config: AppConfig,
+    mut config: AppConfig,
     state: State<'_, Arc<Mutex<AppState>>>,
 ) -> Result<(), AppError> {
     let mut state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
+
+    config.normalize();
 
     // 更新配置
     state.config = config.clone();
@@ -3943,16 +3945,285 @@ fn windows_known_icon_paths(app_name: &str) -> Vec<String> {
 }
 
 #[cfg(target_os = "windows")]
+fn encode_windows_icon_path(value: &str) -> Vec<u16> {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+
+    OsStr::new(value)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
+}
+
+#[cfg(target_os = "windows")]
+unsafe fn get_windows_icon_from_shell_image_list(
+    path: &str,
+    list_type: i32,
+) -> Option<winapi::shared::windef::HICON> {
+    use std::mem::zeroed;
+    use std::ptr::null_mut;
+    use winapi::ctypes::c_void;
+    use winapi::um::commoncontrols::IImageList;
+    use winapi::um::shellapi::{SHGetFileInfoW, SHGetImageList, SHFILEINFOW, SHGFI_SYSICONINDEX};
+    use winapi::Interface;
+
+    let wide_path = encode_windows_icon_path(path);
+    let mut file_info: SHFILEINFOW = zeroed();
+    let lookup_result = SHGetFileInfoW(
+        wide_path.as_ptr(),
+        0,
+        &mut file_info,
+        std::mem::size_of::<SHFILEINFOW>() as u32,
+        SHGFI_SYSICONINDEX,
+    );
+    if lookup_result == 0 {
+        return None;
+    }
+
+    let mut image_list: *mut IImageList = null_mut();
+    let hr = SHGetImageList(
+        list_type,
+        &IImageList::uuidof(),
+        &mut image_list as *mut _ as *mut *mut c_void,
+    );
+    if hr < 0 || image_list.is_null() {
+        return None;
+    }
+
+    let mut icon = null_mut();
+    let hr = (*image_list).GetIcon(file_info.iIcon, 0, &mut icon);
+    (*image_list).Release();
+
+    if hr < 0 || icon.is_null() {
+        None
+    } else {
+        Some(icon)
+    }
+}
+
+#[cfg(target_os = "windows")]
+unsafe fn get_windows_associated_icon(path: &str) -> Option<winapi::shared::windef::HICON> {
+    use std::ptr::null_mut;
+    use winapi::shared::minwindef::WORD;
+    use winapi::um::shellapi::ExtractAssociatedIconW;
+
+    let mut wide_path = encode_windows_icon_path(path);
+    if wide_path.len() < 260 {
+        wide_path.resize(260, 0);
+    }
+
+    let mut icon_index: WORD = 0;
+    let icon = ExtractAssociatedIconW(null_mut(), wide_path.as_mut_ptr(), &mut icon_index);
+    if icon.is_null() {
+        None
+    } else {
+        Some(icon)
+    }
+}
+
+#[cfg(target_os = "windows")]
+unsafe fn render_windows_icon_pixels(
+    icon: winapi::shared::windef::HICON,
+) -> Option<(Vec<u8>, u32, u32)> {
+    const DI_NORMAL: u32 = 0x0003;
+
+    use std::mem::zeroed;
+    use std::ptr::{copy_nonoverlapping, null_mut, write_bytes};
+    use winapi::shared::minwindef::UINT;
+    use winapi::shared::windef::HGDIOBJ;
+    use winapi::um::wingdi::{
+        CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetObjectW, SelectObject,
+        BITMAP, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
+    };
+    use winapi::um::winuser::{DrawIconEx, GetDC, GetIconInfo, ReleaseDC, ICONINFO};
+
+    let mut icon_info: ICONINFO = zeroed();
+    if GetIconInfo(icon, &mut icon_info) == 0 {
+        return None;
+    }
+
+    let rendered = (|| {
+        let source_bitmap = if !icon_info.hbmColor.is_null() {
+            icon_info.hbmColor
+        } else {
+            icon_info.hbmMask
+        };
+        if source_bitmap.is_null() {
+            return None;
+        }
+
+        let mut bitmap: BITMAP = zeroed();
+        let get_object_result = GetObjectW(
+            source_bitmap as *mut _,
+            std::mem::size_of::<BITMAP>() as i32,
+            &mut bitmap as *mut _ as *mut _,
+        );
+        if get_object_result == 0 {
+            return None;
+        }
+
+        let width = bitmap.bmWidth.abs();
+        let mut height = bitmap.bmHeight.abs();
+        if icon_info.hbmColor.is_null() {
+            height /= 2;
+        }
+        if width <= 0 || height <= 0 {
+            return None;
+        }
+
+        let screen_dc = GetDC(null_mut());
+        if screen_dc.is_null() {
+            return None;
+        }
+
+        let mem_dc = CreateCompatibleDC(screen_dc);
+        if mem_dc.is_null() {
+            ReleaseDC(null_mut(), screen_dc);
+            return None;
+        }
+
+        let mut bitmap_info: BITMAPINFO = zeroed();
+        bitmap_info.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
+        bitmap_info.bmiHeader.biWidth = width;
+        bitmap_info.bmiHeader.biHeight = -height;
+        bitmap_info.bmiHeader.biPlanes = 1;
+        bitmap_info.bmiHeader.biBitCount = 32;
+        bitmap_info.bmiHeader.biCompression = BI_RGB;
+
+        let mut dib_bits = null_mut();
+        let dib = CreateDIBSection(
+            screen_dc,
+            &bitmap_info,
+            DIB_RGB_COLORS as UINT,
+            &mut dib_bits,
+            null_mut(),
+            0,
+        );
+        if dib.is_null() || dib_bits.is_null() {
+            DeleteDC(mem_dc);
+            ReleaseDC(null_mut(), screen_dc);
+            return None;
+        }
+
+        let old_object = SelectObject(mem_dc, dib as HGDIOBJ);
+        if old_object.is_null() {
+            DeleteObject(dib as HGDIOBJ);
+            DeleteDC(mem_dc);
+            ReleaseDC(null_mut(), screen_dc);
+            return None;
+        }
+
+        let pixel_len = width as usize * height as usize * 4;
+        write_bytes(dib_bits as *mut u8, 0, pixel_len);
+
+        let draw_result = DrawIconEx(mem_dc, 0, 0, icon, width, height, 0, null_mut(), DI_NORMAL);
+        let mut pixels = None;
+        if draw_result != 0 {
+            let mut buffer = vec![0; pixel_len];
+            copy_nonoverlapping(dib_bits as *const u8, buffer.as_mut_ptr(), pixel_len);
+            pixels = Some((buffer, width as u32, height as u32));
+        }
+
+        SelectObject(mem_dc, old_object);
+        DeleteObject(dib as HGDIOBJ);
+        DeleteDC(mem_dc);
+        ReleaseDC(null_mut(), screen_dc);
+        pixels
+    })();
+
+    if !icon_info.hbmColor.is_null() {
+        DeleteObject(icon_info.hbmColor as HGDIOBJ);
+    }
+    if !icon_info.hbmMask.is_null() {
+        DeleteObject(icon_info.hbmMask as HGDIOBJ);
+    }
+
+    rendered
+}
+
+#[cfg(target_os = "windows")]
+fn encode_windows_icon_base64(mut pixels: Vec<u8>, width: u32, height: u32) -> Option<String> {
+    if width == 0 || height == 0 {
+        return None;
+    }
+
+    for chunk in pixels.chunks_exact_mut(4) {
+        chunk.swap(0, 2);
+    }
+
+    let image = image::RgbaImage::from_raw(width, height, pixels)?;
+    let mut dynamic_image = image::DynamicImage::ImageRgba8(image);
+    if width > 128 || height > 128 {
+        dynamic_image = dynamic_image.resize_exact(128, 128, image::imageops::FilterType::Lanczos3);
+    }
+
+    let mut cursor = std::io::Cursor::new(Vec::new());
+    dynamic_image
+        .write_to(&mut cursor, image::ImageFormat::Png)
+        .ok()?;
+
+    Some(base64::Engine::encode(
+        &base64::engine::general_purpose::STANDARD,
+        cursor.into_inner(),
+    ))
+}
+
+#[cfg(target_os = "windows")]
+fn convert_windows_icon_to_base64(icon: winapi::shared::windef::HICON) -> Option<(String, u32)> {
+    use winapi::um::winuser::DestroyIcon;
+
+    let rendered = unsafe { render_windows_icon_pixels(icon) };
+    unsafe {
+        DestroyIcon(icon);
+    }
+
+    let (pixels, width, height) = rendered?;
+    let encoded = encode_windows_icon_base64(pixels, width, height)?;
+    Some((encoded, width.max(height)))
+}
+
+#[cfg(target_os = "windows")]
+fn extract_windows_icon_base64(path: &str) -> Option<String> {
+    use winapi::um::shellapi::{SHIL_EXTRALARGE, SHIL_JUMBO};
+
+    let mut jumbo_fallback = None;
+
+    if let Some(icon) = unsafe { get_windows_icon_from_shell_image_list(path, SHIL_JUMBO as i32) } {
+        if let Some((encoded, size)) = convert_windows_icon_to_base64(icon) {
+            if size >= 48 {
+                return Some(encoded);
+            }
+            jumbo_fallback = Some(encoded);
+        }
+    }
+
+    let mut extra_large_fallback = None;
+    if let Some(icon) =
+        unsafe { get_windows_icon_from_shell_image_list(path, SHIL_EXTRALARGE as i32) }
+    {
+        if let Some((encoded, size)) = convert_windows_icon_to_base64(icon) {
+            if size >= 32 {
+                return Some(encoded);
+            }
+            extra_large_fallback = Some(encoded);
+        }
+    }
+
+    if let Some(icon) = unsafe { get_windows_associated_icon(path) } {
+        if let Some((encoded, _)) = convert_windows_icon_to_base64(icon) {
+            return Some(encoded);
+        }
+    }
+
+    extra_large_fallback.or(jumbo_fallback)
+}
+
+#[cfg(target_os = "windows")]
 async fn get_app_icon_impl(
     app_name: &str,
     executable_path: Option<&str>,
 ) -> Result<String, AppError> {
-    use std::os::windows::process::CommandExt;
-    use std::process::Command;
-
-    // CREATE_NO_WINDOW 标志
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-    const WINDOWS_ICON_CACHE_VERSION: &str = "v4";
+    const WINDOWS_ICON_CACHE_VERSION: &str = "v5";
 
     // 磁盘缓存：检查是否已有缓存
     let cache_dir = std::env::temp_dir().join("work_review_icons");
@@ -3989,133 +4260,17 @@ async fn get_app_icon_impl(
         return Ok(String::new());
     }
 
-    let ps_path_candidates = icon_lookup_candidates
-        .iter()
-        .map(|path| format!("'{}'", path.replace('\'', "''")))
-        .collect::<Vec<_>>()
-        .join(", ");
+    // 仅对明确的可执行路径提取图标，不扫描注册表、开始菜单快捷方式或全部运行进程。
+    for candidate_path in icon_lookup_candidates {
+        if !Path::new(&candidate_path).exists() {
+            continue;
+        }
 
-    // PowerShell 脚本：仅对明确的可执行路径提取图标。
-    // 这里不再扫描注册表、开始菜单快捷方式或全部运行进程，避免被安全软件误判。
-    let ps_script = format!(
-        r#"
-Add-Type -AssemblyName System.Drawing
-Add-Type @'
-using System;
-using System.Drawing;
-using System.Runtime.InteropServices;
-
-public class JumboIconExtractor {{
-    [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)]
-    struct SHFILEINFO {{
-        public IntPtr hIcon;
-        public int iIcon;
-        public uint dwAttributes;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst=260)]
-        public string szDisplayName;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst=80)]
-        public string szTypeName;
-    }}
-
-    [DllImport("shell32.dll", CharSet=CharSet.Unicode)]
-    static extern IntPtr SHGetFileInfo(string pszPath, uint dwFileAttributes,
-        ref SHFILEINFO psfi, uint cbFileInfo, uint uFlags);
-
-    [DllImport("shell32.dll")]
-    static extern int SHGetImageList(int iImageList, ref Guid riid, out IntPtr ppv);
-
-    [DllImport("comctl32.dll")]
-    static extern IntPtr ImageList_GetIcon(IntPtr himl, int i, int flags);
-
-    [DllImport("user32.dll")]
-    static extern bool DestroyIcon(IntPtr hIcon);
-
-    // 从 ImageList 提取指定大小的图标
-    static Icon GetIconFromList(string path, int listType) {{
-        SHFILEINFO shfi = new SHFILEINFO();
-        uint cbSize = (uint)Marshal.SizeOf(typeof(SHFILEINFO));
-        SHGetFileInfo(path, 0, ref shfi, cbSize, 0x4000); // SHGFI_SYSICONINDEX
-
-        Guid iid = new Guid("46EB5926-582E-4017-9FDF-E8998DAA0950"); // IImageList
-        IntPtr hImgList;
-        int hr = SHGetImageList(listType, ref iid, out hImgList);
-        if (hr != 0 || hImgList == IntPtr.Zero) return null;
-
-        IntPtr hIcon = ImageList_GetIcon(hImgList, shfi.iIcon, 0);
-        if (hIcon == IntPtr.Zero) return null;
-
-        Icon icon = (Icon)Icon.FromHandle(hIcon).Clone();
-        DestroyIcon(hIcon);
-        return icon;
-    }}
-
-    public static string Extract(string path) {{
-        // 尝试 JUMBO (256x256) — listType=4
-        Icon icon = GetIconFromList(path, 4);
-
-        // 降级到 EXTRALARGE (48x48) — listType=2
-        if (icon == null || icon.Width < 48)
-            icon = GetIconFromList(path, 2);
-
-        // 最终回退到 ExtractAssociatedIcon (32x32)
-        if (icon == null || icon.Width < 32)
-            icon = Icon.ExtractAssociatedIcon(path);
-
-        if (icon == null) return "";
-
-        Bitmap bmp = icon.ToBitmap();
-        // 如果图标大于 128，缩放到 128 节省传输大小；否则保持原始尺寸
-        Bitmap output;
-        if (bmp.Width > 128) {{
-            output = new Bitmap(128, 128);
-            using (Graphics g = Graphics.FromImage(output)) {{
-                g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
-                g.DrawImage(bmp, 0, 0, 128, 128);
-            }}
-        }} else {{
-            output = bmp;
-        }}
-
-        using (var ms = new System.IO.MemoryStream()) {{
-            output.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
-            return Convert.ToBase64String(ms.ToArray());
-        }}
-    }}
-}}
-'@
-
-$pathCandidates = @({})
-foreach ($candidatePath in $pathCandidates) {{
-    if (-not [string]::IsNullOrWhiteSpace($candidatePath) -and (Test-Path $candidatePath)) {{
-        $iconBase64 = [JumboIconExtractor]::Extract($candidatePath)
-        if (-not [string]::IsNullOrWhiteSpace($iconBase64)) {{
-            Write-Output $iconBase64
-            exit 0
-        }}
-    }}
-}}
-"#,
-        ps_path_candidates
-    );
-
-    let output = Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            &ps_script,
-        ])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .map_err(|e| AppError::Unknown(format!("执行 PowerShell 失败: {e}")))?;
-
-    if output.status.success() {
-        let base64_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !base64_str.is_empty() && base64_str.len() > 100 {
-            // 缓存到磁盘
-            let _ = std::fs::write(&cache_file, &base64_str);
-            return Ok(base64_str);
+        if let Some(base64_str) = extract_windows_icon_base64(&candidate_path) {
+            if base64_str.len() > 100 {
+                let _ = std::fs::write(&cache_file, &base64_str);
+                return Ok(base64_str);
+            }
         }
     }
 
