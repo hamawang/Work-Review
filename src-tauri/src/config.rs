@@ -397,6 +397,12 @@ pub struct AppConfig {
     /// 桌宠猫体透明度（0.45 - 1.0）
     #[serde(default = "default_avatar_opacity")]
     pub avatar_opacity: f64,
+    /// 桌宠窗口横向位置
+    #[serde(default)]
+    pub avatar_x: Option<i32>,
+    /// 桌宠窗口纵向位置
+    #[serde(default)]
+    pub avatar_y: Option<i32>,
     /// 隐藏系统标题栏装饰
     #[serde(default)]
     pub hide_decorations: bool,
@@ -456,6 +462,8 @@ impl Default for AppConfig {
             avatar_enabled: false,
             avatar_scale: default_avatar_scale(),
             avatar_opacity: default_avatar_opacity(),
+            avatar_x: None,
+            avatar_y: None,
             hide_decorations: false,
             background_image: None,
             background_opacity: 0.25,
@@ -646,6 +654,14 @@ mod tests {
 
         assert_eq!(config.avatar_opacity, default_avatar_opacity());
         assert_eq!(config.avatar_opacity, 0.82);
+    }
+
+    #[test]
+    fn 桌宠默认位置应为空以便首次按锚点吸附() {
+        let config = AppConfig::default();
+
+        assert_eq!(config.avatar_x, None);
+        assert_eq!(config.avatar_y, None);
     }
 
     #[test]

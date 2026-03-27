@@ -76,11 +76,15 @@ pub fn default_avatar_state() -> AvatarStatePayload {
 pub fn derive_avatar_state(
     app_name: &str,
     window_title: &str,
+    browser_url: Option<&str>,
     is_idle: bool,
     is_generating_report: bool,
 ) -> AvatarStatePayload {
     let app_name = normalize_app_name(app_name);
-    let category = crate::monitor::categorize_app(&app_name, window_title);
+    let title_lower = window_title.trim().to_lowercase();
+    let url_lower = browser_url.unwrap_or_default().trim().to_lowercase();
+    let classification =
+        crate::activity_classifier::classify_activity(app_name.as_str(), window_title, browser_url);
 
     if is_generating_report {
         return AvatarStatePayload {
@@ -106,83 +110,138 @@ pub fn derive_avatar_state(
         };
     }
 
-    if is_meeting_context(app_name.as_str(), window_title, &category) {
-        AvatarStatePayload {
-            mode: "meeting".to_string(),
+    match classification.semantic_category.as_str() {
+        "会议沟通" => {
+            let (context_label, hint) = if contains_any(
+                &title_lower,
+                &["共享屏幕", "演示", "demo", "汇报", "review"],
+            ) {
+                ("演示中", "先把演示节奏收稳，再继续推进。")
+            } else if contains_any(&title_lower, &["语音通话", "call", "huddle"]) {
+                ("通话中", "先把关键结论对齐，再回到执行。")
+            } else {
+                ("开会中", "先把沟通结论收拢，再继续推进。")
+            };
+
+            avatar_state("meeting", app_name, context_label, hint)
+        }
+        "音乐音频" => {
+            let (context_label, hint) = if contains_any(&title_lower, &["播客", "podcast"]) {
+                ("播客中", "先把这段观点听完，再决定要不要切走。")
+            } else {
+                ("听歌中", "保持节奏，但别让注意力被带跑。")
+            };
+
+            avatar_state("music", app_name, context_label, hint)
+        }
+        "视频内容" => {
+            let (context_label, hint) =
+                if contains_any(&title_lower, &["课程", "教程", "lesson", "training", "回放"]) {
+                    ("学习中", "先吸收这一段，再整理下一步动作。")
+                } else if contains_any(&title_lower, &["直播", "live"]) {
+                    ("直播中", "先看清实时信息，再判断是否介入。")
+                } else {
+                    ("视频中", "先看完这一段，再决定下一步。")
+                };
+
+            avatar_state("video", app_name, context_label, hint)
+        }
+        "资料阅读" => {
+            let (context_label, hint) = if contains_any(
+                &title_lower,
+                &["文档", "readme", "docs", "guide", "manual", "wiki"],
+            ) || contains_any(&url_lower, &["/docs", "readme", "wiki", "developer.", "docs."])
+            {
+                ("文档中", "先把文档结构看清，再动手修改。")
+            } else {
+                ("阅读中", "正在吸收内容，先别打断节奏")
+            };
+
+            avatar_state("reading", app_name, context_label, hint)
+        }
+        "资料调研" => avatar_state(
+            "reading",
             app_name,
-            context_label: "开会中".to_string(),
-            hint: "先把沟通结论收拢，再继续推进。".to_string(),
-            is_idle: false,
-            is_generating_report: false,
-            avatar_opacity: AVATAR_OPACITY_DEFAULT,
-        }
-    } else if is_music_context(app_name.as_str(), window_title, &category) {
-        AvatarStatePayload {
-            mode: "music".to_string(),
+            "调研中",
+            "先收拢信息，再决定怎么推进。",
+        ),
+        "休息娱乐" => avatar_state(
+            "slacking",
             app_name,
-            context_label: "听歌中".to_string(),
-            hint: "保持节奏，但别让注意力被带跑。".to_string(),
-            is_idle: false,
-            is_generating_report: false,
-            avatar_opacity: AVATAR_OPACITY_DEFAULT,
-        }
-    } else if is_video_context(app_name.as_str(), window_title, &category) {
-        AvatarStatePayload {
-            mode: "video".to_string(),
+            "休息中",
+            "放松可以，但别把节奏彻底丢掉。",
+        ),
+        "即时聊天" => avatar_state(
+            "working",
             app_name,
-            context_label: "视频中".to_string(),
-            hint: "先看完这一段，再决定下一步。".to_string(),
-            is_idle: false,
-            is_generating_report: false,
-            avatar_opacity: AVATAR_OPACITY_DEFAULT,
+            "沟通中",
+            "先把来回沟通收住，再继续推进。",
+        ),
+        "内容撰写" => {
+            let (context_label, hint) =
+                if contains_any(&title_lower, &["日报", "周报", "复盘", "总结"]) {
+                    ("总结中", "先把结论写完整，再回头补细节。")
+                } else if contains_any(&title_lower, &["方案", "需求", "prd"]) {
+                    ("方案中", "先把核心方案收拢，再继续展开。")
+                } else {
+                    ("写作中", "先把这段内容写完整，再回头修。")
+                };
+
+            avatar_state("working", app_name, context_label, hint)
         }
-    } else if is_reading_context(app_name.as_str(), window_title, &category) {
-        AvatarStatePayload {
-            mode: "reading".to_string(),
+        "任务规划" => {
+            let (context_label, hint) = if contains_any(
+                &title_lower,
+                &["排期", "里程碑", "backlog", "sprint", "roadmap"],
+            ) || contains_any(&url_lower, &["linear.app", "jira", "atlassian.net"])
+            {
+                ("排期中", "先把节奏和先后顺序排清楚。")
+            } else if contains_any(&title_lower, &["待办", "任务", "看板", "board"]) {
+                ("拆解中", "先把任务拆细，再进入执行。")
+            } else {
+                ("规划中", "先把优先级排清楚，再进入执行。")
+            };
+
+            avatar_state("working", app_name, context_label, hint)
+        }
+        "编码开发" => avatar_state(
+            "working",
             app_name,
-            context_label: "阅读中".to_string(),
-            hint: "正在吸收内容，先别打断节奏".to_string(),
-            is_idle: false,
-            is_generating_report: false,
-            avatar_opacity: AVATAR_OPACITY_DEFAULT,
-        }
-    } else if is_slacking_context(app_name.as_str(), window_title, &category) {
-        AvatarStatePayload {
-            mode: "slacking".to_string(),
+            "编码中",
+            "先把这一段逻辑收住，再看下一处。",
+        ),
+        "设计创作" => avatar_state(
+            "working",
             app_name,
-            context_label: "摸鱼中".to_string(),
-            hint: "休息可以，但别忘了回来继续推进。".to_string(),
-            is_idle: false,
-            is_generating_report: false,
-            avatar_opacity: AVATAR_OPACITY_DEFAULT,
-        }
-    } else {
-        AvatarStatePayload {
-            mode: "working".to_string(),
-            app_name: app_name.clone(),
-            context_label: "办公中".to_string(),
-            hint: "保持推进，先把这一段收住".to_string(),
-            is_idle: false,
-            is_generating_report: false,
-            avatar_opacity: AVATAR_OPACITY_DEFAULT,
-        }
+            "创作中",
+            "先把这一版想法落下来，再比较取舍。",
+        ),
+        "未知活动" if classification.confidence < 60 => avatar_state(
+            "working",
+            app_name,
+            "判断中",
+            "信息还不够明确，先继续观察一下。",
+        ),
+        _ => avatar_state("working", app_name, "办公中", "保持推进，先把这一段收住"),
     }
 }
 
-pub fn apply_avatar_opacity(
-    mut payload: AvatarStatePayload,
-    opacity: f64,
-) -> AvatarStatePayload {
+pub fn apply_avatar_opacity(mut payload: AvatarStatePayload, opacity: f64) -> AvatarStatePayload {
     payload.avatar_opacity = opacity;
     payload
 }
 
-pub fn sync_avatar_window(app: &AppHandle, enabled: bool, scale: f64) -> tauri::Result<()> {
+pub fn sync_avatar_window(
+    app: &AppHandle,
+    enabled: bool,
+    scale: f64,
+    saved_position: Option<(i32, i32)>,
+) -> tauri::Result<()> {
     if enabled {
         ensure_avatar_window(app, scale)?;
         if let Some(window) = app.get_webview_window(AVATAR_WINDOW_LABEL) {
             let normalized_scale = normalize_avatar_scale(scale);
-            let (x, y) = default_avatar_position(app, normalized_scale);
+            let (x, y) = default_avatar_position(app, normalized_scale, saved_position);
             resize_avatar_window(&window, normalized_scale);
             let _ = window.set_always_on_top(true);
             let _ = window.set_visible_on_all_workspaces(true);
@@ -257,7 +316,11 @@ fn resize_avatar_window(window: &WebviewWindow, scale: f64) {
     ))));
 }
 
-fn default_avatar_position(app: &AppHandle, scale: f64) -> (i32, i32) {
+fn default_avatar_position(
+    app: &AppHandle,
+    scale: f64,
+    saved_position: Option<(i32, i32)>,
+) -> (i32, i32) {
     if let Some(main_window) = app.get_webview_window("main") {
         if let Ok(Some(monitor)) = main_window.current_monitor() {
             let anchor = match (main_window.outer_position(), main_window.outer_size()) {
@@ -270,19 +333,23 @@ fn default_avatar_position(app: &AppHandle, scale: f64) -> (i32, i32) {
                 _ => None,
             };
 
-            return compute_avatar_position(monitor, anchor, scale);
+            return compute_avatar_position(monitor, anchor, saved_position, scale);
         }
     }
 
     if let Ok(Some(monitor)) = app.primary_monitor() {
-        return compute_avatar_position(monitor, None, scale);
+        return compute_avatar_position(monitor, None, saved_position, scale);
     }
 
-    (40, 40)
+    saved_position.unwrap_or((40, 40))
 }
 
-fn compute_avatar_position(monitor: Monitor, anchor: Option<Rect>, scale: f64) -> (i32, i32) {
-    let (window_width, window_height) = avatar_window_size(scale);
+fn compute_avatar_position(
+    monitor: Monitor,
+    anchor: Option<Rect>,
+    saved_position: Option<(i32, i32)>,
+    scale: f64,
+) -> (i32, i32) {
     let work_area = monitor.work_area();
     let bounds = Rect {
         x: work_area.position.x,
@@ -291,6 +358,27 @@ fn compute_avatar_position(monitor: Monitor, anchor: Option<Rect>, scale: f64) -
         height: work_area.size.height as i32,
     };
 
+    resolve_avatar_position(bounds, anchor, saved_position, scale)
+}
+
+fn resolve_avatar_position(
+    bounds: Rect,
+    anchor: Option<Rect>,
+    saved_position: Option<(i32, i32)>,
+    scale: f64,
+) -> (i32, i32) {
+    let (window_width, window_height) = avatar_window_size(scale);
+
+    if let Some((saved_x, saved_y)) = saved_position {
+        return clamp_avatar_position_with_size(
+            bounds,
+            saved_x,
+            saved_y,
+            window_width,
+            window_height,
+        );
+    }
+
     let preferred_x = anchor
         .map(|rect| rect.x + rect.width - window_width as i32 - AVATAR_WINDOW_MARGIN as i32)
         .unwrap_or(bounds.x + bounds.width - window_width as i32 - AVATAR_WINDOW_MARGIN as i32);
@@ -298,7 +386,13 @@ fn compute_avatar_position(monitor: Monitor, anchor: Option<Rect>, scale: f64) -
         .map(|rect| rect.y + rect.height - window_height as i32 - AVATAR_WINDOW_MARGIN as i32)
         .unwrap_or(bounds.y + bounds.height - window_height as i32 - AVATAR_WINDOW_MARGIN as i32);
 
-    clamp_avatar_position_with_size(bounds, preferred_x, preferred_y, window_width, window_height)
+    clamp_avatar_position_with_size(
+        bounds,
+        preferred_x,
+        preferred_y,
+        window_width,
+        window_height,
+    )
 }
 
 fn clamp_avatar_position(bounds: Rect, preferred_x: i32, preferred_y: i32) -> (i32, i32) {
@@ -352,97 +446,37 @@ fn normalize_app_name(app_name: &str) -> String {
     }
 }
 
-fn contains_any(text: &str, keywords: &[&str]) -> bool {
-    keywords.iter().any(|keyword| text.contains(keyword))
+fn contains_any(text: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| text.contains(needle))
 }
 
-fn is_meeting_context(app_name: &str, window_title: &str, category: &str) -> bool {
-    let app_lower = app_name.to_lowercase();
-    let title_lower = window_title.to_lowercase();
-
-    category == "communication"
-        || contains_any(
-            &app_lower,
-            &["zoom", "teams", "meeting", "meet", "腾讯会议", "飞书会议", "dingtalk"],
-        )
-        || contains_any(
-            &title_lower,
-            &["会议", "例会", "meeting", "meet", "call", "huddle", "standup"],
-        )
-}
-
-fn is_music_context(app_name: &str, window_title: &str, category: &str) -> bool {
-    let app_lower = app_name.to_lowercase();
-    let title_lower = window_title.to_lowercase();
-
-    category == "entertainment"
-        && (contains_any(
-            &app_lower,
-            &["spotify", "music", "网易云", "qqmusic", "apple music"],
-        ) || contains_any(&title_lower, &["playlist", "album", "歌单", "音乐", "歌词"]))
-}
-
-fn is_video_context(app_name: &str, window_title: &str, category: &str) -> bool {
-    let app_lower = app_name.to_lowercase();
-    let title_lower = window_title.to_lowercase();
-
-    contains_any(
-        &app_lower,
-        &["youtube", "netflix", "bilibili", "爱奇艺", "优酷", "腾讯视频", "vlc", "iina"],
-    ) || (category == "entertainment"
-        && contains_any(&title_lower, &["视频", "movie", "episode", "直播", "回放", "播放"]))
-}
-
-fn is_reading_context(app_name: &str, window_title: &str, category: &str) -> bool {
-    let app_lower = app_name.to_lowercase();
-    let title_lower = window_title.to_lowercase();
-
-    contains_any(
-        &app_lower,
-        &["preview", "reader", "pdf", "kindle", "zotero", "notion", "obsidian", "typora"],
-    )
-        || (category == "browser"
-            && contains_any(
-                &title_lower,
-                &["文档", "readme", "docs", "notion", "帮助", "manual", "guide", "wiki"],
-            ))
-        || app_lower.contains("preview")
-        || app_lower.contains("reader")
-        || app_lower.contains("pdf")
-        || title_lower.contains("文档")
-        || title_lower.contains("readme")
-        || title_lower.contains("docs")
-        || title_lower.contains("notion")
-        || title_lower.contains("帮助")
-}
-
-fn is_slacking_context(app_name: &str, window_title: &str, category: &str) -> bool {
-    let app_lower = app_name.to_lowercase();
-    let title_lower = window_title.to_lowercase();
-
-    (category == "entertainment"
-        && !is_music_context(app_name, window_title, category)
-        && !is_video_context(app_name, window_title, category))
-        || contains_any(
-            &app_lower,
-            &["steam", "game", "微博", "小红书", "douyin", "抖音", "twitter", "x "],
-        )
-        || contains_any(
-            &title_lower,
-            &["微博", "小红书", "reddit", "douyin", "抖音", "游戏", "社区", "动态"],
-        )
+fn avatar_state(
+    mode: &str,
+    app_name: String,
+    context_label: &str,
+    hint: &str,
+) -> AvatarStatePayload {
+    AvatarStatePayload {
+        mode: mode.to_string(),
+        app_name,
+        context_label: context_label.to_string(),
+        hint: hint.to_string(),
+        is_idle: false,
+        is_generating_report: false,
+        avatar_opacity: AVATAR_OPACITY_DEFAULT,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        avatar_window_size, clamp_avatar_position, default_avatar_state, derive_avatar_state, Rect,
-        AVATAR_WINDOW_HEIGHT, AVATAR_WINDOW_WIDTH,
+        avatar_window_size, clamp_avatar_position, default_avatar_state, derive_avatar_state,
+        resolve_avatar_position, Rect, AVATAR_WINDOW_HEIGHT, AVATAR_WINDOW_WIDTH,
     };
 
     #[test]
     fn 空闲状态应优先进入待机模式() {
-        let state = derive_avatar_state("VS Code", "main.rs", true, false);
+        let state = derive_avatar_state("VS Code", "main.rs", None, true, false);
 
         assert_eq!(state.mode, "idle");
         assert!(state.is_idle);
@@ -451,7 +485,7 @@ mod tests {
 
     #[test]
     fn 日报生成应优先进入生成模式() {
-        let state = derive_avatar_state("Google Chrome", "日报", false, true);
+        let state = derive_avatar_state("Google Chrome", "日报", None, false, true);
 
         assert_eq!(state.mode, "generating");
         assert!(state.is_generating_report);
@@ -460,23 +494,32 @@ mod tests {
 
     #[test]
     fn 浏览器上下文应识别为阅读模式() {
-        let state = derive_avatar_state("Google Chrome", "产品文档 - docs", false, false);
+        let state = derive_avatar_state("Google Chrome", "产品文档 - docs", None, false, false);
 
         assert_eq!(state.mode, "reading");
-        assert_eq!(state.context_label, "阅读中");
+        assert_eq!(state.context_label, "文档中");
     }
 
     #[test]
     fn 会议应用应识别为开会状态() {
-        let state = derive_avatar_state("Zoom", "项目例会", false, false);
+        let state = derive_avatar_state("Zoom", "项目例会", None, false, false);
 
         assert_eq!(state.mode, "meeting");
         assert_eq!(state.context_label, "开会中");
     }
 
     #[test]
+    fn 普通沟通工具不应直接识别为开会状态() {
+        let state = derive_avatar_state("Slack", "设计评审结论整理", None, false, false);
+
+        assert_ne!(state.mode, "meeting");
+        assert_eq!(state.mode, "working");
+        assert_eq!(state.context_label, "沟通中");
+    }
+
+    #[test]
     fn 音乐应用应识别为音乐状态() {
-        let state = derive_avatar_state("Spotify", "Daily Mix", false, false);
+        let state = derive_avatar_state("Spotify", "Daily Mix", None, false, false);
 
         assert_eq!(state.mode, "music");
         assert_eq!(state.context_label, "听歌中");
@@ -484,26 +527,86 @@ mod tests {
 
     #[test]
     fn 视频应用应识别为视频状态() {
-        let state = derive_avatar_state("Bilibili", "RustConf 回放", false, false);
+        let state = derive_avatar_state("Bilibili", "RustConf 回放", None, false, false);
 
         assert_eq!(state.mode, "video");
-        assert_eq!(state.context_label, "视频中");
+        assert_eq!(state.context_label, "学习中");
     }
 
     #[test]
     fn 娱乐场景应识别为摸鱼状态() {
-        let state = derive_avatar_state("Steam", "Balatro", false, false);
+        let state = derive_avatar_state("Steam", "Balatro", None, false, false);
 
         assert_eq!(state.mode, "slacking");
-        assert_eq!(state.context_label, "摸鱼中");
+        assert_eq!(state.context_label, "休息中");
     }
 
     #[test]
     fn 非阅读上下文应识别为工作模式() {
-        let state = derive_avatar_state("Cursor", "commands.rs", false, false);
+        let state = derive_avatar_state("Cursor", "commands.rs", None, false, false);
 
         assert_eq!(state.mode, "working");
-        assert_eq!(state.context_label, "办公中");
+        assert_eq!(state.context_label, "编码中");
+    }
+
+    #[test]
+    fn github_拉取请求页面应识别为编码中() {
+        let state = derive_avatar_state(
+            "Google Chrome",
+            "Fix updater retry · Pull Request #12 · wm94i/Work_Review",
+            Some("https://github.com/wm94i/Work_Review/pull/12"),
+            false,
+            false,
+        );
+
+        assert_eq!(state.mode, "working");
+        assert_eq!(state.context_label, "编码中");
+    }
+
+    #[test]
+    fn 浏览器任务看板应识别为排期中() {
+        let state = derive_avatar_state(
+            "Google Chrome",
+            "Sprint 15 Board - Linear",
+            Some("https://linear.app/work-review/board"),
+            false,
+            false,
+        );
+
+        assert_eq!(state.mode, "working");
+        assert_eq!(state.context_label, "排期中");
+    }
+
+    #[test]
+    fn 共享屏幕会议应识别为演示中() {
+        let state = derive_avatar_state("Zoom", "项目评审 - 共享屏幕", None, false, false);
+
+        assert_eq!(state.mode, "meeting");
+        assert_eq!(state.context_label, "演示中");
+    }
+
+    #[test]
+    fn 教程视频应识别为学习中() {
+        let state = derive_avatar_state("Bilibili", "Tauri 教程 第三课", None, false, false);
+
+        assert_eq!(state.mode, "video");
+        assert_eq!(state.context_label, "学习中");
+    }
+
+    #[test]
+    fn 播客内容应识别为播客中() {
+        let state = derive_avatar_state("Spotify", "AI Podcast 第 42 期", None, false, false);
+
+        assert_eq!(state.mode, "music");
+        assert_eq!(state.context_label, "播客中");
+    }
+
+    #[test]
+    fn 低证据活动应在桌宠层回退为判断中() {
+        let state = derive_avatar_state("UnknownApp", "首页", None, false, false);
+
+        assert_eq!(state.mode, "working");
+        assert_eq!(state.context_label, "判断中");
     }
 
     #[test]
@@ -552,6 +655,46 @@ mod tests {
         };
 
         let (x, y) = clamp_avatar_position(bounds, 1200, 600);
+
+        assert_eq!(
+            (x, y),
+            (
+                1280 - AVATAR_WINDOW_WIDTH as i32,
+                720 - AVATAR_WINDOW_HEIGHT as i32
+            )
+        );
+    }
+
+    #[test]
+    fn 已保存桌宠位置应优先于默认吸附位置() {
+        let bounds = Rect {
+            x: 0,
+            y: 0,
+            width: 1440,
+            height: 900,
+        };
+        let anchor = Rect {
+            x: 100,
+            y: 100,
+            width: 900,
+            height: 600,
+        };
+
+        let (x, y) = resolve_avatar_position(bounds, Some(anchor), Some((120, 240)), 0.9);
+
+        assert_eq!((x, y), (120, 240));
+    }
+
+    #[test]
+    fn 已保存桌宠位置超出范围时应回到可视区域() {
+        let bounds = Rect {
+            x: 0,
+            y: 0,
+            width: 1280,
+            height: 720,
+        };
+
+        let (x, y) = resolve_avatar_position(bounds, None, Some((1600, 900)), 0.9);
 
         assert_eq!(
             (x, y),

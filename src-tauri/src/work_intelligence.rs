@@ -976,6 +976,8 @@ mod tests {
             duration,
             browser_url: browser_url.map(|value| value.to_string()),
             executable_path: None,
+            semantic_category: None,
+            semantic_confidence: None,
         }
     }
 

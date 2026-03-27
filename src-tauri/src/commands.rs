@@ -2284,6 +2284,7 @@ pub async fn generate_report(
             crate::avatar_engine::derive_avatar_state(
                 &state.avatar_state.app_name,
                 "",
+                None,
                 state.avatar_state.is_idle,
                 true,
             ),
@@ -2327,6 +2328,7 @@ pub async fn generate_report(
             crate::avatar_engine::derive_avatar_state(
                 &state.avatar_state.app_name,
                 "",
+                None,
                 state.avatar_state.is_idle,
                 false,
             ),
@@ -2406,13 +2408,20 @@ pub async fn save_config(
 
         // 更新隐私过滤器
         state.privacy_filter.update_config(&config.privacy);
-        state.avatar_state =
-            crate::avatar_engine::apply_avatar_opacity(state.avatar_state.clone(), config.avatar_opacity);
+        state.avatar_state = crate::avatar_engine::apply_avatar_opacity(
+            state.avatar_state.clone(),
+            config.avatar_opacity,
+        );
         state.avatar_state.clone()
     };
 
-    crate::avatar_engine::sync_avatar_window(&app, config.avatar_enabled, config.avatar_scale)
-        .map_err(|e| AppError::Unknown(format!("同步桌宠窗口失败: {e}")))?;
+    crate::avatar_engine::sync_avatar_window(
+        &app,
+        config.avatar_enabled,
+        config.avatar_scale,
+        config.avatar_x.zip(config.avatar_y),
+    )
+    .map_err(|e| AppError::Unknown(format!("同步桌宠窗口失败: {e}")))?;
     if config.avatar_enabled {
         crate::avatar_engine::emit_avatar_state(&app, &avatar_state);
     }
@@ -2885,6 +2894,23 @@ pub async fn get_avatar_state(
 ) -> Result<crate::avatar_engine::AvatarStatePayload, AppError> {
     let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
     Ok(state.avatar_state.clone())
+}
+
+/// 保存桌宠窗口位置
+#[tauri::command]
+pub async fn save_avatar_position(
+    x: i32,
+    y: i32,
+    state: State<'_, Arc<Mutex<AppState>>>,
+) -> Result<(), AppError> {
+    let mut state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
+    let config_path = state.config_path.clone();
+
+    state.config.avatar_x = Some(x);
+    state.config.avatar_y = Some(y);
+    state.config.save(&config_path)?;
+
+    Ok(())
 }
 
 /// 显示主窗口
@@ -3423,6 +3449,8 @@ pub async fn take_screenshot(state: State<'_, Arc<Mutex<AppState>>>) -> Result<A
         window_title,
         browser_url,
         category,
+        semantic_category,
+        semantic_confidence,
         relative_path,
         executable_path,
     ) = {
@@ -3444,15 +3472,20 @@ pub async fn take_screenshot(state: State<'_, Arc<Mutex<AppState>>>) -> Result<A
         // 执行截屏
         let result = state.screenshot_service.capture()?;
         let relative_path = state.screenshot_service.get_relative_path(&result.path);
-        let category =
-            crate::monitor::categorize_app(&active_window.app_name, &active_window.window_title);
+        let classification = crate::activity_classifier::classify_activity(
+            &active_window.app_name,
+            &active_window.window_title,
+            active_window.browser_url.as_deref(),
+        );
 
         (
             result,
             active_window.app_name,
             active_window.window_title,
             active_window.browser_url,
-            category,
+            classification.base_category,
+            classification.semantic_category,
+            classification.confidence,
             relative_path,
             active_window.executable_path,
         )
@@ -3470,6 +3503,8 @@ pub async fn take_screenshot(state: State<'_, Arc<Mutex<AppState>>>) -> Result<A
         duration: 30,
         browser_url,
         executable_path,
+        semantic_category: Some(semantic_category),
+        semantic_confidence: Some(i32::from(semantic_confidence)),
     };
 
     // 保存到数据库
@@ -4757,11 +4792,10 @@ async fn get_app_icon_impl(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_updater_manifest_candidates, build_windows_icon_cache_key,
-        build_fallback_assistant_answer,
-        detect_assistant_question_kind, detect_assistant_question_kind_with_mode,
-        merge_windows_icon_lookup_candidates, AssistantChatMessage, AssistantQuestionKind,
-        AssistantReasoningMode,
+        build_fallback_assistant_answer, build_updater_manifest_candidates,
+        build_windows_icon_cache_key, detect_assistant_question_kind,
+        detect_assistant_question_kind_with_mode, merge_windows_icon_lookup_candidates,
+        AssistantChatMessage, AssistantQuestionKind, AssistantReasoningMode,
     };
     use crate::database::MemorySearchItem;
     use crate::work_intelligence::{

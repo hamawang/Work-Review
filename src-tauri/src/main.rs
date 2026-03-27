@@ -6,6 +6,7 @@
 #[macro_use]
 extern crate objc;
 
+mod activity_classifier;
 mod analysis;
 mod avatar_engine;
 mod commands;
@@ -319,6 +320,96 @@ fn avatar_monitor_poll_interval_ms() -> u64 {
     180
 }
 
+#[derive(Debug, Clone, PartialEq)]
+struct AvatarActivityDecision {
+    should_continue: bool,
+    reset_state: Option<avatar_engine::AvatarStatePayload>,
+}
+
+fn avatar_activity_decision(
+    avatar_enabled: bool,
+    is_recording: bool,
+    is_paused: bool,
+    avatar_opacity: f64,
+) -> AvatarActivityDecision {
+    if !avatar_enabled {
+        return AvatarActivityDecision {
+            should_continue: false,
+            reset_state: Some(avatar_engine::default_avatar_state()),
+        };
+    }
+
+    if !is_recording || is_paused {
+        return AvatarActivityDecision {
+            should_continue: false,
+            reset_state: Some(avatar_engine::apply_avatar_opacity(
+                avatar_engine::default_avatar_state(),
+                avatar_opacity,
+            )),
+        };
+    }
+
+    AvatarActivityDecision {
+        should_continue: true,
+        reset_state: None,
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct AvatarTransitionDecision {
+    emit_state: Option<avatar_engine::AvatarStatePayload>,
+    pending_state: Option<avatar_engine::AvatarStatePayload>,
+    pending_hits: u8,
+}
+
+fn avatar_transition_decision(
+    current: Option<&avatar_engine::AvatarStatePayload>,
+    pending: Option<&avatar_engine::AvatarStatePayload>,
+    pending_hits: u8,
+    candidate: &avatar_engine::AvatarStatePayload,
+) -> AvatarTransitionDecision {
+    const AVATAR_MODE_STABILITY_THRESHOLD: u8 = 2;
+
+    match current {
+        None => AvatarTransitionDecision {
+            emit_state: Some(candidate.clone()),
+            pending_state: None,
+            pending_hits: 0,
+        },
+        Some(current_state) if current_state == candidate => AvatarTransitionDecision {
+            emit_state: None,
+            pending_state: None,
+            pending_hits: 0,
+        },
+        Some(current_state) if current_state.mode == candidate.mode => AvatarTransitionDecision {
+            emit_state: Some(candidate.clone()),
+            pending_state: None,
+            pending_hits: 0,
+        },
+        Some(_) => {
+            let next_hits = if pending == Some(candidate) {
+                pending_hits.saturating_add(1)
+            } else {
+                1
+            };
+
+            if next_hits >= AVATAR_MODE_STABILITY_THRESHOLD {
+                AvatarTransitionDecision {
+                    emit_state: Some(candidate.clone()),
+                    pending_state: None,
+                    pending_hits: 0,
+                }
+            } else {
+                AvatarTransitionDecision {
+                    emit_state: None,
+                    pending_state: Some(candidate.clone()),
+                    pending_hits: next_hits,
+                }
+            }
+        }
+    }
+}
+
 fn should_skip_transient_window(active_window: &monitor::ActiveWindow) -> bool {
     let app_lower = active_window.app_name.to_lowercase();
     matches!(
@@ -350,6 +441,8 @@ fn should_skip_system_window(active_window: &monitor::ActiveWindow) -> bool {
 
 async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
     let mut last_avatar_state: Option<avatar_engine::AvatarStatePayload> = None;
+    let mut pending_avatar_state: Option<avatar_engine::AvatarStatePayload> = None;
+    let mut pending_avatar_hits: u8 = 0;
     let mut last_window_signature: Option<String> = None;
     const IDLE_TIMEOUT_MINUTES: u64 = 3;
     let idle_detector = idle_detector::IdleDetector::new(IDLE_TIMEOUT_MINUTES);
@@ -368,16 +461,28 @@ async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
             )
         };
 
-        if !avatar_enabled {
-            if last_avatar_state.take().is_some() {
-                let mut state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
-                state_guard.avatar_state = avatar_engine::default_avatar_state();
-            }
+        let activity_decision =
+            avatar_activity_decision(avatar_enabled, is_recording, is_paused, avatar_opacity);
+        if !activity_decision.should_continue {
+            pending_avatar_state = None;
+            pending_avatar_hits = 0;
             last_window_signature = None;
-            continue;
-        }
 
-        if !is_recording || is_paused {
+            if let Some(reset_state) = activity_decision.reset_state {
+                let should_emit_reset = last_avatar_state.as_ref() != Some(&reset_state);
+                {
+                    let mut state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
+                    state_guard.avatar_state = reset_state.clone();
+                }
+
+                if avatar_enabled && should_emit_reset {
+                    avatar_engine::emit_avatar_state(&app, &reset_state);
+                }
+
+                last_avatar_state = Some(reset_state);
+            } else {
+                last_avatar_state = None;
+            }
             continue;
         }
 
@@ -387,7 +492,8 @@ async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
             Err(_) => continue,
         };
 
-        if should_skip_transient_window(&active_window) || should_skip_system_window(&active_window) {
+        if should_skip_transient_window(&active_window) || should_skip_system_window(&active_window)
+        {
             continue;
         }
 
@@ -396,6 +502,7 @@ async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
             avatar_engine::derive_avatar_state(
                 &active_window.app_name,
                 &active_window.window_title,
+                active_window.browser_url.as_deref(),
                 input_idle,
                 avatar_generating_report,
             ),
@@ -403,7 +510,17 @@ async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
         );
 
         let window_signature = format!("{}|{}", active_window.app_name, active_window.window_title);
-        if last_avatar_state.as_ref() != Some(&avatar_state) {
+        let transition_decision = avatar_transition_decision(
+            last_avatar_state.as_ref(),
+            pending_avatar_state.as_ref(),
+            pending_avatar_hits,
+            &avatar_state,
+        );
+
+        pending_avatar_state = transition_decision.pending_state;
+        pending_avatar_hits = transition_decision.pending_hits;
+
+        if let Some(next_avatar_state) = transition_decision.emit_state {
             let collect_cost_ms = sampled_at.elapsed().as_millis();
             let previous_mode = last_avatar_state
                 .as_ref()
@@ -412,14 +529,14 @@ async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
 
             {
                 let mut state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
-                state_guard.avatar_state = avatar_state.clone();
+                state_guard.avatar_state = next_avatar_state.clone();
             }
 
-            avatar_engine::emit_avatar_state(&app, &avatar_state);
+            avatar_engine::emit_avatar_state(&app, &next_avatar_state);
 
             let entered_idle = match &last_avatar_state {
-                Some(previous) => !previous.is_idle && avatar_state.is_idle,
-                None => avatar_state.is_idle,
+                Some(previous) => !previous.is_idle && next_avatar_state.is_idle,
+                None => next_avatar_state.is_idle,
             };
 
             if entered_idle {
@@ -432,12 +549,12 @@ async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
             log::info!(
                 "🐾 桌宠状态切换: {} -> {} | 窗口={} | 采集耗时={}ms",
                 previous_mode,
-                avatar_state.mode,
+                next_avatar_state.mode,
                 window_signature,
                 collect_cost_ms
             );
 
-            last_avatar_state = Some(avatar_state);
+            last_avatar_state = Some(next_avatar_state);
             last_window_signature = Some(window_signature);
         } else if last_window_signature.as_deref() != Some(window_signature.as_str()) {
             log::debug!(
@@ -715,8 +832,11 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, window: tauri::
                     active_window.app_name,
                     active_window.window_title
                 );
-                let category =
-                    monitor::categorize_app(&active_window.app_name, &active_window.window_title);
+                let classification = crate::activity_classifier::classify_activity(
+                    &active_window.app_name,
+                    &active_window.window_title,
+                    active_window.browser_url.as_deref(),
+                );
                 let activity = database::Activity {
                     id: None,
                     timestamp: chrono::Local::now().timestamp(),
@@ -724,10 +844,12 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, window: tauri::
                     window_title: "[内容已脱敏]".to_string(),
                     screenshot_path: String::new(),
                     ocr_text: None,
-                    category,
+                    category: classification.base_category,
                     duration: duration_to_record,
                     browser_url: None,
                     executable_path: active_window.executable_path,
+                    semantic_category: Some(classification.semantic_category),
+                    semantic_confidence: Some(i32::from(classification.confidence)),
                 };
 
                 // 短暂获取锁写入数据库
@@ -741,8 +863,12 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, window: tauri::
                 }
             }
             PrivacyAction::Record => {
-                let category =
-                    monitor::categorize_app(&active_window.app_name, &active_window.window_title);
+                let classification = crate::activity_classifier::classify_activity(
+                    &active_window.app_name,
+                    &active_window.window_title,
+                    active_window.browser_url.as_deref(),
+                );
+                let category = classification.base_category.clone();
                 let current_timestamp = chrono::Local::now().timestamp();
 
                 // ===== 应用切换时长归属修正 =====
@@ -1015,6 +1141,8 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, window: tauri::
                         duration: latest.duration + effective_duration,
                         browser_url: active_window.browser_url,
                         executable_path: active_window.executable_path,
+                        semantic_category: Some(classification.semantic_category.clone()),
+                        semantic_confidence: Some(i32::from(classification.confidence)),
                     })
                 } else {
                     // === 新建路径：正常截屏并保存 ===
@@ -1066,6 +1194,8 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, window: tauri::
                                 duration: effective_duration,
                                 browser_url: active_window.browser_url,
                                 executable_path: active_window.executable_path,
+                                semantic_category: Some(classification.semantic_category.clone()),
+                                semantic_confidence: Some(i32::from(classification.confidence)),
                             };
 
                             let inserted = {
@@ -1218,6 +1348,11 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, window: tauri::
                     ow.window_title.clone()
                 };
 
+                let classification = crate::activity_classifier::classify_activity(
+                    &ow.app_name,
+                    &ow.window_title,
+                    ow.browser_url.as_deref(),
+                );
                 let activity = database::Activity {
                     id: None,
                     timestamp: current_ts,
@@ -1229,6 +1364,8 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, window: tauri::
                     duration: ow_duration,
                     browser_url: None,
                     executable_path: ow.executable_path.clone(),
+                    semantic_category: Some(classification.semantic_category),
+                    semantic_confidence: Some(i32::from(classification.confidence)),
                 };
 
                 let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
@@ -1516,16 +1653,22 @@ async fn main() {
             let window_for_tray = window.clone();
             let app_handle = app.handle().clone();
 
-            let (avatar_enabled, avatar_scale, avatar_state) = {
+            let (avatar_enabled, avatar_scale, avatar_position, avatar_state) = {
                 let state_guard = state.inner().lock().unwrap_or_else(|e| e.into_inner());
                 (
                     state_guard.config.avatar_enabled,
                     state_guard.config.avatar_scale,
+                    state_guard.config.avatar_x.zip(state_guard.config.avatar_y),
                     state_guard.avatar_state.clone(),
                 )
             };
 
-            if let Err(e) = avatar_engine::sync_avatar_window(&app.handle(), avatar_enabled, avatar_scale) {
+            if let Err(e) = avatar_engine::sync_avatar_window(
+                &app.handle(),
+                avatar_enabled,
+                avatar_scale,
+                avatar_position,
+            ) {
                 log::warn!("初始化桌宠窗口失败: {e}");
             } else if avatar_enabled {
                 avatar_engine::emit_avatar_state(&app.handle(), &avatar_state);
@@ -1667,6 +1810,7 @@ async fn main() {
             commands::resume_recording,
             commands::get_recording_state,
             commands::get_avatar_state,
+            commands::save_avatar_position,
             commands::get_data_dir,
             commands::get_default_data_dir,
             commands::get_runtime_platform,
@@ -1732,7 +1876,11 @@ async fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{avatar_monitor_poll_interval_ms, monitoring_poll_interval_ms, recording_loop_decision};
+    use super::{
+        avatar_activity_decision, avatar_monitor_poll_interval_ms, avatar_transition_decision,
+        monitoring_poll_interval_ms, recording_loop_decision,
+    };
+    use crate::avatar_engine::{apply_avatar_opacity, default_avatar_state, derive_avatar_state};
 
     #[test]
     fn 暂停录制时应重置截图计时器() {
@@ -1766,5 +1914,51 @@ mod tests {
     #[test]
     fn 桌宠独立轮询间隔应压到一百八十毫秒() {
         assert_eq!(avatar_monitor_poll_interval_ms(), 180);
+    }
+
+    #[test]
+    fn 暂停录制时桌宠应回到待命状态() {
+        let decision = avatar_activity_decision(true, true, true, 0.82);
+
+        assert!(!decision.should_continue);
+        assert_eq!(
+            decision.reset_state,
+            Some(apply_avatar_opacity(default_avatar_state(), 0.82))
+        );
+    }
+
+    #[test]
+    fn 停止录制时桌宠应回到待命状态() {
+        let decision = avatar_activity_decision(true, false, false, 0.82);
+
+        assert!(!decision.should_continue);
+        assert_eq!(
+            decision.reset_state,
+            Some(apply_avatar_opacity(default_avatar_state(), 0.82))
+        );
+    }
+
+    #[test]
+    fn 模式首次波动时不应立刻切换桌宠状态() {
+        let current = derive_avatar_state("Cursor", "main.rs", None, false, false);
+        let candidate = derive_avatar_state("Google Chrome", "产品文档 - docs", None, false, false);
+
+        let decision = avatar_transition_decision(Some(&current), None, 0, &candidate);
+
+        assert_eq!(decision.emit_state, None);
+        assert_eq!(decision.pending_state, Some(candidate));
+        assert_eq!(decision.pending_hits, 1);
+    }
+
+    #[test]
+    fn 模式连续两次命中后才应切换桌宠状态() {
+        let current = derive_avatar_state("Cursor", "main.rs", None, false, false);
+        let candidate = derive_avatar_state("Google Chrome", "产品文档 - docs", None, false, false);
+
+        let decision = avatar_transition_decision(Some(&current), Some(&candidate), 1, &candidate);
+
+        assert_eq!(decision.emit_state, Some(candidate));
+        assert_eq!(decision.pending_state, None);
+        assert_eq!(decision.pending_hits, 0);
     }
 }

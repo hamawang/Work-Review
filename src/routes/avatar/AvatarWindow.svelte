@@ -5,7 +5,11 @@
   import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
   import AvatarCanvas from '../../lib/components/Avatar/AvatarCanvas.svelte';
   import AvatarPopover from '../../lib/components/Avatar/AvatarPopover.svelte';
-  import { getAvatarStateBubble } from '../../lib/components/Avatar/avatarStateMeta.js';
+  import {
+    getAvatarMotionStepDelay,
+    getAvatarStateBubble,
+    getAvatarTransitionMeta,
+  } from '../../lib/components/Avatar/avatarStateMeta.js';
 
   const appWindow = getCurrentWebviewWindow();
   const nativeWindow = getCurrentWindow();
@@ -22,6 +26,12 @@
   let bubble = null;
   let bubbleTimer = null;
   let lastStateBubbleAt = 0;
+  let transitionClass = '';
+  let transitionTimer = null;
+  let motionBeat = 0;
+  let motionTimer = null;
+  let positionSaveTimer = null;
+  let lastSavedPositionKey = null;
 
   function showBubble(payload) {
     bubble = payload;
@@ -56,9 +66,40 @@
     }
   }
 
+  function scheduleAvatarPositionSave(position) {
+    const nextX = Math.round(position.x);
+    const nextY = Math.round(position.y);
+    const nextKey = `${nextX},${nextY}`;
+
+    clearTimeout(positionSaveTimer);
+    positionSaveTimer = setTimeout(async () => {
+      if (nextKey === lastSavedPositionKey) {
+        return;
+      }
+
+      try {
+        await invoke('save_avatar_position', { x: nextX, y: nextY });
+        lastSavedPositionKey = nextKey;
+      } catch (e) {
+        console.error('保存桌宠位置失败:', e);
+      }
+    }, 240);
+  }
+
+  function scheduleNextMotionStep() {
+    clearTimeout(motionTimer);
+    const delay = getAvatarMotionStepDelay(state.mode, state.contextLabel, motionBeat);
+    motionTimer = setTimeout(() => {
+      motionBeat = (motionBeat + 1) % 96;
+      scheduleNextMotionStep();
+    }, delay);
+  }
+
   onMount(() => {
     let unlistenState = () => {};
     let unlistenBubble = () => {};
+    let unlistenMoved = () => {};
+    scheduleNextMotionStep();
 
     (async () => {
       try {
@@ -70,6 +111,12 @@
       unlistenState = await appWindow.listen('avatar-state-changed', (event) => {
         const nextState = event.payload;
         const stateBubble = getAvatarStateBubble(nextState.mode);
+        const transition = getAvatarTransitionMeta(
+          state.mode,
+          nextState.mode,
+          state.contextLabel,
+          nextState.contextLabel,
+        );
 
         if (
           stateBubble &&
@@ -80,18 +127,42 @@
           showBubble(stateBubble);
         }
 
+        if (
+          transition.className &&
+          (
+            nextState.mode !== state.mode ||
+            nextState.contextLabel !== state.contextLabel
+          )
+        ) {
+          transitionClass = transition.className;
+          clearTimeout(transitionTimer);
+          transitionTimer = setTimeout(() => {
+            transitionClass = '';
+            transitionTimer = null;
+          }, transition.durationMs);
+        }
+
         state = nextState;
+        scheduleNextMotionStep();
       });
 
       unlistenBubble = await appWindow.listen('avatar-bubble', (event) => {
         showBubble(event.payload);
       });
+
+      unlistenMoved = await nativeWindow.onMoved(({ payload: position }) => {
+        scheduleAvatarPositionSave(position);
+      });
     })();
 
     return () => {
       clearTimeout(bubbleTimer);
+      clearTimeout(transitionTimer);
+      clearTimeout(positionSaveTimer);
+      clearTimeout(motionTimer);
       unlistenState();
       unlistenBubble();
+      unlistenMoved();
     };
   });
 </script>
@@ -102,6 +173,8 @@
   <div class="h-full w-full">
     <AvatarCanvas
       {state}
+      {transitionClass}
+      {motionBeat}
       on:avatarpointerdown={startAvatarDrag}
       on:avataractivate={openMainWindow}
     />

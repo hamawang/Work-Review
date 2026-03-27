@@ -42,6 +42,12 @@ pub struct Activity {
     /// 可执行文件路径（主要用于 Windows 图标读取）
     #[serde(default)]
     pub executable_path: Option<String>,
+    /// 中文语义分类
+    #[serde(default)]
+    pub semantic_category: Option<String>,
+    /// 语义分类置信度（0-100）
+    #[serde(default)]
+    pub semantic_confidence: Option<i32>,
 }
 
 /// 每日报告
@@ -306,7 +312,9 @@ impl Database {
                 category TEXT NOT NULL,
                 duration INTEGER NOT NULL,
                 browser_url TEXT,
-                executable_path TEXT
+                executable_path TEXT,
+                semantic_category TEXT,
+                semantic_confidence INTEGER
             )",
             [],
         )?;
@@ -353,6 +361,16 @@ impl Database {
         let _ = conn.execute("ALTER TABLE activities ADD COLUMN browser_url TEXT", []);
         // 迁移：添加 executable_path 列（如果不存在）
         let _ = conn.execute("ALTER TABLE activities ADD COLUMN executable_path TEXT", []);
+        // 迁移：添加 semantic_category 列（如果不存在）
+        let _ = conn.execute(
+            "ALTER TABLE activities ADD COLUMN semantic_category TEXT",
+            [],
+        );
+        // 迁移：添加 semantic_confidence 列（如果不存在）
+        let _ = conn.execute(
+            "ALTER TABLE activities ADD COLUMN semantic_confidence INTEGER",
+            [],
+        );
 
         Ok(())
     }
@@ -370,8 +388,8 @@ impl Database {
             .filter(|url| !url.is_empty());
 
         conn.execute(
-            "INSERT INTO activities (timestamp, app_name, window_title, screenshot_path, ocr_text, category, duration, browser_url, executable_path)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            "INSERT INTO activities (timestamp, app_name, window_title, screenshot_path, ocr_text, category, duration, browser_url, executable_path, semantic_category, semantic_confidence)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 activity.timestamp,
                 activity.app_name,
@@ -382,6 +400,8 @@ impl Database {
                 activity.duration,
                 normalized_browser_url,
                 activity.executable_path,
+                activity.semantic_category,
+                activity.semantic_confidence,
             ],
         )?;
 
@@ -398,7 +418,7 @@ impl Database {
         let start_ts = chrono::Local::now().timestamp() - 86400;
 
         let mut stmt = conn.prepare(
-            "SELECT id, timestamp, app_name, window_title, screenshot_path, ocr_text, category, duration, browser_url, executable_path
+            "SELECT id, timestamp, app_name, window_title, screenshot_path, ocr_text, category, duration, browser_url, executable_path, semantic_category, semantic_confidence
              FROM activities
              WHERE app_name = ?1 AND timestamp >= ?2
              ORDER BY id DESC
@@ -418,6 +438,8 @@ impl Database {
                 duration: row.get(7)?,
                 browser_url: row.get(8)?,
                 executable_path: row.get(9)?,
+                semantic_category: row.get(10)?,
+                semantic_confidence: row.get(11)?,
             }))
         } else {
             Ok(None)
@@ -434,7 +456,7 @@ impl Database {
         let start_ts = chrono::Local::now().timestamp() - 86400;
 
         let mut stmt = conn.prepare(
-            "SELECT id, timestamp, app_name, window_title, screenshot_path, ocr_text, category, duration, browser_url, executable_path
+            "SELECT id, timestamp, app_name, window_title, screenshot_path, ocr_text, category, duration, browser_url, executable_path, semantic_category, semantic_confidence
              FROM activities
              WHERE browser_url = ?1 AND timestamp >= ?2
              ORDER BY id DESC
@@ -454,6 +476,8 @@ impl Database {
                 duration: row.get(7)?,
                 browser_url: row.get(8)?,
                 executable_path: row.get(9)?,
+                semantic_category: row.get(10)?,
+                semantic_confidence: row.get(11)?,
             }))
         } else {
             Ok(None)
@@ -474,7 +498,7 @@ impl Database {
         };
 
         let mut stmt = conn.prepare(
-            "SELECT id, timestamp, app_name, window_title, screenshot_path, ocr_text, category, duration, browser_url, executable_path
+            "SELECT id, timestamp, app_name, window_title, screenshot_path, ocr_text, category, duration, browser_url, executable_path, semantic_category, semantic_confidence
              FROM activities
              WHERE app_name = ?1 AND timestamp >= ?2
              ORDER BY id DESC
@@ -494,6 +518,8 @@ impl Database {
                 duration: row.get(7)?,
                 browser_url: row.get(8)?,
                 executable_path: row.get(9)?,
+                semantic_category: row.get(10)?,
+                semantic_confidence: row.get(11)?,
             }))
         } else {
             Ok(None)
@@ -518,7 +544,7 @@ impl Database {
         };
 
         let mut stmt = conn.prepare(
-            "SELECT id, timestamp, app_name, window_title, screenshot_path, ocr_text, category, duration, browser_url, executable_path
+            "SELECT id, timestamp, app_name, window_title, screenshot_path, ocr_text, category, duration, browser_url, executable_path, semantic_category, semantic_confidence
              FROM activities
              WHERE app_name = ?1 AND window_title = ?2 AND timestamp >= ?3
              ORDER BY id DESC
@@ -538,6 +564,8 @@ impl Database {
                 duration: row.get(7)?,
                 browser_url: row.get(8)?,
                 executable_path: row.get(9)?,
+                semantic_category: row.get(10)?,
+                semantic_confidence: row.get(11)?,
             }))
         } else {
             Ok(None)
@@ -563,7 +591,7 @@ impl Database {
 
         // 使用 RTRIM 规范化数据库中的 URL 进行比较
         let mut stmt = conn.prepare(
-            "SELECT id, timestamp, app_name, window_title, screenshot_path, ocr_text, category, duration, browser_url, executable_path
+            "SELECT id, timestamp, app_name, window_title, screenshot_path, ocr_text, category, duration, browser_url, executable_path, semantic_category, semantic_confidence
              FROM activities
              WHERE RTRIM(browser_url, '/') = ?1 AND timestamp >= ?2
              ORDER BY id DESC
@@ -583,6 +611,8 @@ impl Database {
                 duration: row.get(7)?,
                 browser_url: row.get(8)?,
                 executable_path: row.get(9)?,
+                semantic_category: row.get(10)?,
+                semantic_confidence: row.get(11)?,
             }))
         } else {
             Ok(None)
@@ -596,7 +626,7 @@ impl Database {
         })?;
 
         let mut stmt = conn.prepare(
-            "SELECT id, timestamp, app_name, window_title, screenshot_path, ocr_text, category, duration, browser_url, executable_path
+            "SELECT id, timestamp, app_name, window_title, screenshot_path, ocr_text, category, duration, browser_url, executable_path, semantic_category, semantic_confidence
              FROM activities WHERE id = ?1"
         )?;
 
@@ -613,6 +643,8 @@ impl Database {
                 duration: row.get(7)?,
                 browser_url: row.get(8)?,
                 executable_path: row.get(9)?,
+                semantic_category: row.get(10)?,
+                semantic_confidence: row.get(11)?,
             }))
         } else {
             Ok(None)
@@ -1174,11 +1206,13 @@ impl Database {
                     window_title,
                     screenshot_path,
                     ocr_text,
-                category,
-                duration,
-                COALESCE(RTRIM(browser_url, '/'), '') as browser_url,
-                executable_path,
-                ROW_NUMBER() OVER (
+                    category,
+                    duration,
+                    COALESCE(RTRIM(browser_url, '/'), '') as browser_url,
+                    executable_path,
+                    semantic_category,
+                    semantic_confidence,
+                    ROW_NUMBER() OVER (
                         PARTITION BY
                             app_name,
                             CASE
@@ -1208,7 +1242,9 @@ impl Database {
                 category,
                 total_duration,
                 browser_url,
-                executable_path
+                executable_path,
+                semantic_category,
+                semantic_confidence
              FROM ranked
              WHERE rn = 1
              ORDER BY timestamp DESC, id DESC
@@ -1233,6 +1269,8 @@ impl Database {
                         Some(browser_url)
                     },
                     executable_path: row.get(9)?,
+                    semantic_category: row.get(10)?,
+                    semantic_confidence: row.get(11)?,
                 })
             })?
             .filter_map(|r| r.ok())
@@ -1257,7 +1295,7 @@ impl Database {
         let (start_ts, end_ts) = parse_date_bounds(date_from, date_to);
 
         let mut stmt = conn.prepare(
-            "SELECT id, timestamp, app_name, window_title, screenshot_path, ocr_text, category, duration, browser_url, executable_path
+            "SELECT id, timestamp, app_name, window_title, screenshot_path, ocr_text, category, duration, browser_url, executable_path, semantic_category, semantic_confidence
              FROM activities
              WHERE (?1 IS NULL OR timestamp >= ?1)
                AND (?2 IS NULL OR timestamp < ?2)
@@ -1278,6 +1316,8 @@ impl Database {
                     duration: row.get(7)?,
                     browser_url: row.get(8)?,
                     executable_path: row.get(9)?,
+                    semantic_category: row.get(10)?,
+                    semantic_confidence: row.get(11)?,
                 })
             })?
             .filter_map(|row| row.ok())
@@ -1430,7 +1470,7 @@ impl Database {
         let end_ts = start_ts + 3600; // 1小时
 
         let mut stmt = conn.prepare(
-            "SELECT id, timestamp, app_name, window_title, screenshot_path, ocr_text, category, duration, browser_url, executable_path
+            "SELECT id, timestamp, app_name, window_title, screenshot_path, ocr_text, category, duration, browser_url, executable_path, semantic_category, semantic_confidence
              FROM activities
              WHERE timestamp >= ?1 AND timestamp < ?2
              ORDER BY timestamp ASC"
@@ -1449,6 +1489,8 @@ impl Database {
                     duration: row.get(7)?,
                     browser_url: row.get(8)?,
                     executable_path: row.get(9)?,
+                    semantic_category: row.get(10)?,
+                    semantic_confidence: row.get(11)?,
                 })
             })?
             .filter_map(|r| r.ok())
@@ -1778,6 +1820,8 @@ mod tests {
                 duration: 10,
                 browser_url: None,
                 executable_path: None,
+                semantic_category: None,
+                semantic_confidence: None,
             },
             Activity {
                 id: None,
@@ -1790,6 +1834,8 @@ mod tests {
                 duration: 25,
                 browser_url: None,
                 executable_path: None,
+                semantic_category: None,
+                semantic_confidence: None,
             },
             Activity {
                 id: None,
@@ -1802,6 +1848,8 @@ mod tests {
                 duration: 15,
                 browser_url: None,
                 executable_path: None,
+                semantic_category: None,
+                semantic_confidence: None,
             },
         ];
 
@@ -1847,6 +1895,8 @@ mod tests {
                 duration: 540,
                 browser_url: None,
                 executable_path: None,
+                semantic_category: None,
+                semantic_confidence: None,
             },
             Activity {
                 id: None,
@@ -1859,6 +1909,8 @@ mod tests {
                 duration: 540,
                 browser_url: None,
                 executable_path: None,
+                semantic_category: None,
+                semantic_confidence: None,
             },
             Activity {
                 id: None,
@@ -1871,6 +1923,8 @@ mod tests {
                 duration: 300,
                 browser_url: None,
                 executable_path: None,
+                semantic_category: None,
+                semantic_confidence: None,
             },
         ];
 
@@ -1920,6 +1974,8 @@ mod tests {
             duration: 20 * 60,
             browser_url: None,
             executable_path: None,
+            semantic_category: None,
+            semantic_confidence: None,
         };
 
         db.insert_activity(&activity).expect("插入测试数据失败");
@@ -1951,6 +2007,8 @@ mod tests {
             duration: 20 * 60,
             browser_url: None,
             executable_path: None,
+            semantic_category: None,
+            semantic_confidence: None,
         };
 
         db.insert_activity(&activity).expect("插入测试数据失败");
@@ -1982,6 +2040,8 @@ mod tests {
             duration: 20 * 60,
             browser_url: None,
             executable_path: None,
+            semantic_category: None,
+            semantic_confidence: None,
         };
 
         db.insert_activity(&activity).expect("插入测试数据失败");
@@ -2017,6 +2077,8 @@ mod tests {
                 executable_path: Some(
                     r"C:\Users\wmy\AppData\Local\Programs\Microsoft VS Code\Code.exe".to_string(),
                 ),
+                semantic_category: None,
+                semantic_confidence: None,
             },
             Activity {
                 id: None,
@@ -2029,6 +2091,8 @@ mod tests {
                 duration: 25,
                 browser_url: None,
                 executable_path: Some(r"D:\Portable\Code\Code.exe".to_string()),
+                semantic_category: None,
+                semantic_confidence: None,
             },
         ];
 
@@ -2046,6 +2110,40 @@ mod tests {
             file_a.executable_path.as_deref(),
             Some(r"D:\Portable\Code\Code.exe")
         );
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn 活动记录应保留语义分类结果() {
+        let db_path = temp_db_path("semantic-category-roundtrip");
+        let db = Database::new(&db_path).expect("创建测试数据库失败");
+        let now = chrono::Local::now().timestamp();
+
+        let activity = Activity {
+            id: None,
+            timestamp: now,
+            app_name: "Google Chrome".to_string(),
+            window_title: "Tauri Guide".to_string(),
+            screenshot_path: "guide.jpg".to_string(),
+            ocr_text: None,
+            category: "browser".to_string(),
+            duration: 120,
+            browser_url: Some("https://tauri.app/zh-cn/develop/calling-rust/".to_string()),
+            semantic_category: Some("资料阅读".to_string()),
+            semantic_confidence: Some(86),
+            executable_path: None,
+        };
+
+        db.insert_activity(&activity).expect("插入测试数据失败");
+
+        let latest = db
+            .get_last_activity_by_app("Google Chrome")
+            .expect("读取活动失败")
+            .expect("未读取到活动");
+
+        assert_eq!(latest.semantic_category.as_deref(), Some("资料阅读"));
+        assert_eq!(latest.semantic_confidence, Some(86));
 
         let _ = std::fs::remove_file(db_path);
     }
