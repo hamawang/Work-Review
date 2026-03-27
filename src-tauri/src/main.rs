@@ -281,6 +281,33 @@ fn recover_recent_browser_url(
         })
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RecordingLoopDecision {
+    should_continue: bool,
+    screenshot_interval: u64,
+    reset_capture_clock: bool,
+}
+
+fn recording_loop_decision(
+    is_recording: bool,
+    is_paused: bool,
+    screenshot_interval: u64,
+) -> RecordingLoopDecision {
+    if !is_recording || is_paused {
+        RecordingLoopDecision {
+            should_continue: false,
+            screenshot_interval: 1,
+            reset_capture_clock: true,
+        }
+    } else {
+        RecordingLoopDecision {
+            should_continue: true,
+            screenshot_interval,
+            reset_capture_clock: false,
+        }
+    }
+}
+
 // 系统托盘在 setup 钩子中使用 TrayIconBuilder 创建 (Tauri v2)
 
 /// 后台截屏任务
@@ -320,19 +347,25 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, window: tauri::
         }
 
         // 首先检查录制状态并获取配置
-        let (should_continue, screenshot_interval) = {
+        let decision = {
             let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
-            if !state_guard.is_recording || state_guard.is_paused {
-                (false, 1u64)
-            } else {
-                (true, state_guard.config.screenshot_interval)
-            }
+            recording_loop_decision(
+                state_guard.is_recording,
+                state_guard.is_paused,
+                state_guard.config.screenshot_interval,
+            )
         };
 
-        if !should_continue {
+        if decision.reset_capture_clock {
+            last_capture_time = std::time::Instant::now();
+        }
+
+        if !decision.should_continue {
             tokio::time::sleep(Duration::from_secs(1)).await;
             continue;
         }
+
+        let screenshot_interval = decision.screenshot_interval;
 
         // 轮询检测活动窗口（3秒间隔，降低页面切换统计误差）
         tokio::time::sleep(Duration::from_secs(POLL_INTERVAL_SECS)).await;
@@ -1546,4 +1579,33 @@ async fn main() {
             }
             _ => {}
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::recording_loop_decision;
+
+    #[test]
+    fn 暂停录制时应重置截图计时器() {
+        let decision = recording_loop_decision(true, true, 30);
+        assert!(!decision.should_continue);
+        assert!(decision.reset_capture_clock);
+        assert_eq!(decision.screenshot_interval, 1);
+    }
+
+    #[test]
+    fn 停止录制时应重置截图计时器() {
+        let decision = recording_loop_decision(false, false, 30);
+        assert!(!decision.should_continue);
+        assert!(decision.reset_capture_clock);
+        assert_eq!(decision.screenshot_interval, 1);
+    }
+
+    #[test]
+    fn 正常录制时应保留截图间隔() {
+        let decision = recording_loop_decision(true, false, 30);
+        assert!(decision.should_continue);
+        assert!(!decision.reset_capture_clock);
+        assert_eq!(decision.screenshot_interval, 30);
+    }
 }

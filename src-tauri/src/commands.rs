@@ -348,6 +348,56 @@ fn format_memory_references(references: &[MemorySearchItem]) -> String {
         .join("\n\n")
 }
 
+fn is_low_signal_reference(item: &MemorySearchItem) -> bool {
+    let title = item.title.trim().to_lowercase();
+    let excerpt = item.excerpt.trim().to_lowercase();
+
+    let menu_terms = [
+        "文件",
+        "编辑",
+        "显示",
+        "窗口",
+        "帮助",
+        "历史记录",
+        "书签",
+        "标签页",
+        "个人资料",
+        "记录状态",
+        "时间线",
+        "日报",
+        "window",
+        "help",
+        "file",
+        "edit",
+        "view",
+    ];
+
+    let menu_hits = menu_terms
+        .iter()
+        .filter(|term| excerpt.contains(**term))
+        .count();
+    let path_like_title = title.contains('/') || title.contains('\\');
+    let generic_title = title.starts_with("无标题")
+        || title.starts_with("untitled")
+        || title == "work review"
+        || title.starts_with("work review -");
+    let browser_shell_title =
+        title.contains("google chrome") && item.browser_url.as_deref().unwrap_or("").is_empty();
+
+    menu_hits >= 5 || ((path_like_title || generic_title || browser_shell_title) && menu_hits >= 3)
+}
+
+fn filter_reference_items<'a>(
+    references: &'a [MemorySearchItem],
+    limit: usize,
+) -> Vec<&'a MemorySearchItem> {
+    references
+        .iter()
+        .filter(|item| !is_low_signal_reference(item))
+        .take(limit)
+        .collect()
+}
+
 fn build_memory_answer_prompt(question: &str, references: &[MemorySearchItem]) -> String {
     format!(
         "你是一个个人工作记忆助手。请严格基于给定记录回答，不要编造未出现的事实。\n\
@@ -418,75 +468,29 @@ impl AssistantTool {
     }
 }
 
-fn detect_assistant_tools(question: &str) -> Vec<AssistantTool> {
-    let normalized = question.trim().to_lowercase();
-    if normalized.is_empty() {
-        return vec![AssistantTool::Memory];
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AssistantQuestionKind {
+    StageSummary,
+    OutcomeRecap,
+    ProcessRecap,
+    EvidenceQuery,
+}
 
-    let mut tools = Vec::new();
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AssistantReasoningMode {
+    Basic,
+    AiEnhanced,
+}
 
-    let mentions_review = [
-        "周报", "复盘", "回顾", "总结", "汇总", "本周", "上周", "这周",
-    ]
-    .iter()
-    .any(|pattern| normalized.contains(pattern));
-    let mentions_todos = ["待办", "todo", "跟进", "后续", "下一步", "next step"]
-        .iter()
-        .any(|pattern| normalized.contains(pattern));
-    let mentions_sessions = ["session", "工作段", "时间段", "时段", "连续", "切换"]
-        .iter()
-        .any(|pattern| normalized.contains(pattern));
-    let mentions_intents = ["意图", "主要在做", "重心", "方向", "类型", "主要工作"]
-        .iter()
-        .any(|pattern| normalized.contains(pattern));
-    let mentions_memory = [
-        "什么时候",
-        "哪里",
-        "哪个",
-        "谁",
-        "记录",
-        "ocr",
-        "网页",
-        "链接",
-        "url",
-    ]
-    .iter()
-    .any(|pattern| normalized.contains(pattern));
-
-    if mentions_review {
-        tools.push(AssistantTool::Review);
-        tools.push(AssistantTool::Intents);
-    }
-    if mentions_todos {
-        tools.push(AssistantTool::Todos);
-    }
-    if mentions_sessions {
-        tools.push(AssistantTool::Sessions);
-    }
-    if mentions_intents {
-        tools.push(AssistantTool::Intents);
-    }
-    if mentions_memory || tools.is_empty() {
-        tools.push(AssistantTool::Memory);
-    }
-
-    if normalized.contains("主要做了什么") || normalized.contains("最近在做什么") {
-        if !tools.contains(&AssistantTool::Review) {
-            tools.push(AssistantTool::Review);
-        }
-        if !tools.contains(&AssistantTool::Memory) {
-            tools.push(AssistantTool::Memory);
+impl AssistantQuestionKind {
+    fn label(&self) -> &'static str {
+        match self {
+            AssistantQuestionKind::StageSummary => "阶段总结",
+            AssistantQuestionKind::OutcomeRecap => "结果复盘",
+            AssistantQuestionKind::ProcessRecap => "过程复盘",
+            AssistantQuestionKind::EvidenceQuery => "依据追问",
         }
     }
-
-    let mut unique = Vec::new();
-    for tool in tools {
-        if !unique.contains(&tool) {
-            unique.push(tool);
-        }
-    }
-    unique
 }
 
 fn build_history_context(history: &[AssistantChatMessage]) -> String {
@@ -502,9 +506,40 @@ fn build_history_context(history: &[AssistantChatMessage]) -> String {
         .join("\n")
 }
 
+fn is_short_follow_up_question(question: &str) -> bool {
+    let trimmed = question.trim();
+    let normalized = trimmed.to_lowercase();
+
+    trimmed.chars().count() <= 18
+        && [
+            "继续",
+            "展开",
+            "细说",
+            "详细",
+            "具体",
+            "接着",
+            "那",
+            "这个",
+            "这里",
+            "这个结论",
+            "说说",
+            "依据",
+        ]
+        .iter()
+        .any(|pattern| normalized.contains(pattern))
+}
+
+fn assistant_reasoning_mode(model_config: Option<&ModelConfig>) -> AssistantReasoningMode {
+    if model_config.is_some_and(is_text_model_available) {
+        AssistantReasoningMode::AiEnhanced
+    } else {
+        AssistantReasoningMode::Basic
+    }
+}
+
 fn build_contextual_query(question: &str, history: &[AssistantChatMessage]) -> String {
     let trimmed = question.trim();
-    if trimmed.chars().count() >= 8 {
+    if trimmed.chars().count() >= 8 && !is_short_follow_up_question(trimmed) {
         return trimmed.to_string();
     }
 
@@ -521,30 +556,312 @@ fn build_contextual_query(question: &str, history: &[AssistantChatMessage]) -> S
     }
 }
 
-fn detect_assistant_tools_with_history(
-    question: &str,
-    history: &[AssistantChatMessage],
-) -> Vec<AssistantTool> {
-    // 阶段 1：先对当前问题单独匹配
-    let current_tools = detect_assistant_tools(question);
-
-    // 如果当前问题已命中具体工具（不只是默认的 Memory），直接用，避免历史污染
-    let only_default_memory = current_tools.len() == 1 && current_tools[0] == AssistantTool::Memory;
-    if !only_default_memory {
-        return current_tools;
+fn build_question_analysis_context(question: &str, history: &[AssistantChatMessage]) -> String {
+    let trimmed = question.trim();
+    if history.is_empty() {
+        return trimmed.to_lowercase();
     }
 
-    // 阶段 2：当前问题什么都没命中（只有默认 Memory）→ 拼接历史再匹配，作为上下文补充
-    if history.is_empty() {
-        return current_tools;
+    let should_expand = trimmed.chars().count() <= 18
+        || [
+            "这个",
+            "这个结论",
+            "这里",
+            "这些",
+            "它",
+            "上面",
+            "刚才",
+            "继续",
+            "展开",
+            "依据",
+        ]
+        .iter()
+        .any(|pattern| trimmed.contains(pattern));
+
+    if !should_expand {
+        return trimmed.to_lowercase();
     }
 
     let mut context = build_history_context(history);
     if !context.is_empty() {
         context.push('\n');
     }
-    context.push_str(question);
-    detect_assistant_tools(&context)
+    context.push_str(trimmed);
+    context.to_lowercase()
+}
+
+fn detect_question_kind_from_text(text: &str) -> AssistantQuestionKind {
+    let context = text.trim().to_lowercase();
+
+    if context.is_empty() {
+        return AssistantQuestionKind::StageSummary;
+    }
+
+    let evidence_patterns = [
+        "依据",
+        "证据",
+        "怎么得出",
+        "怎么判断",
+        "为什么这么说",
+        "哪些记录",
+        "哪条记录",
+        "从哪里看",
+        "原文",
+    ];
+    if evidence_patterns
+        .iter()
+        .any(|pattern| context.contains(pattern))
+    {
+        return AssistantQuestionKind::EvidenceQuery;
+    }
+
+    let process_patterns = [
+        "过程",
+        "怎么推进",
+        "时间花在哪",
+        "花在哪",
+        "节奏",
+        "session",
+        "工作段",
+        "时段",
+        "时间线",
+        "切换",
+        "过程复盘",
+    ];
+    if process_patterns
+        .iter()
+        .any(|pattern| context.contains(pattern))
+    {
+        return AssistantQuestionKind::ProcessRecap;
+    }
+
+    let outcome_patterns = [
+        "结果",
+        "产出",
+        "完成了什么",
+        "推进到哪",
+        "进展",
+        "交付",
+        "没收口",
+        "待办",
+        "下一步",
+        "后续",
+        "风险",
+        "阻塞",
+    ];
+    if outcome_patterns
+        .iter()
+        .any(|pattern| context.contains(pattern))
+    {
+        return AssistantQuestionKind::OutcomeRecap;
+    }
+
+    AssistantQuestionKind::StageSummary
+}
+
+fn last_user_question_kind(history: &[AssistantChatMessage]) -> Option<AssistantQuestionKind> {
+    history
+        .iter()
+        .rev()
+        .find(|message| message.role == "user" && !message.content.trim().is_empty())
+        .map(|message| detect_question_kind_from_text(&message.content))
+}
+
+fn infer_question_kind_from_assistant_reply(
+    history: &[AssistantChatMessage],
+) -> Option<AssistantQuestionKind> {
+    let content = history
+        .iter()
+        .rev()
+        .find(|message| message.role == "assistant" && !message.content.trim().is_empty())
+        .map(|message| message.content.trim().to_lowercase())?;
+
+    let mut best_kind = AssistantQuestionKind::StageSummary;
+    let mut best_score = 0i32;
+
+    let candidates: [(AssistantQuestionKind, &[&str]); 4] = [
+        (
+            AssistantQuestionKind::EvidenceQuery,
+            &[
+                "## 依据补充",
+                "依据",
+                "记录",
+                "原始记录",
+                "证据",
+                "哪条记录",
+            ],
+        ),
+        (
+            AssistantQuestionKind::ProcessRecap,
+            &[
+                "## 过程分析",
+                "session",
+                "工作段",
+                "时间花在",
+                "推进片段",
+                "切换",
+            ],
+        ),
+        (
+            AssistantQuestionKind::OutcomeRecap,
+            &["待办", "风险", "交付", "结果概览", "收口", "下一步"],
+        ),
+        (
+            AssistantQuestionKind::StageSummary,
+            &["结论", "主线", "阶段", "主要做了什么", "工作重心"],
+        ),
+    ];
+
+    for (kind, patterns) in candidates {
+        let score = patterns
+            .iter()
+            .map(|pattern| {
+                if content.contains(pattern) {
+                    if pattern.starts_with("## ") {
+                        3
+                    } else {
+                        1
+                    }
+                } else {
+                    0
+                }
+            })
+            .sum::<i32>();
+
+        if score > best_score {
+            best_score = score;
+            best_kind = kind;
+        }
+    }
+
+    if best_score > 0 {
+        Some(best_kind)
+    } else {
+        None
+    }
+}
+
+fn detect_assistant_question_kind_with_mode(
+    question: &str,
+    history: &[AssistantChatMessage],
+    mode: AssistantReasoningMode,
+) -> AssistantQuestionKind {
+    let trimmed = question.trim();
+    let current_kind = detect_question_kind_from_text(trimmed);
+
+    if current_kind == AssistantQuestionKind::EvidenceQuery {
+        return current_kind;
+    }
+
+    if is_short_follow_up_question(trimmed) {
+        if mode == AssistantReasoningMode::AiEnhanced {
+            if let Some(assistant_kind) = infer_question_kind_from_assistant_reply(history) {
+                if assistant_kind != AssistantQuestionKind::StageSummary {
+                    return assistant_kind;
+                }
+            }
+        }
+
+        if let Some(previous_kind) = last_user_question_kind(history) {
+            return previous_kind;
+        }
+    }
+
+    let context = build_question_analysis_context(question, history);
+    let contextual_kind = detect_question_kind_from_text(&context);
+    if contextual_kind != AssistantQuestionKind::StageSummary {
+        return contextual_kind;
+    }
+
+    current_kind
+}
+
+fn detect_assistant_question_kind(
+    question: &str,
+    history: &[AssistantChatMessage],
+) -> AssistantQuestionKind {
+    detect_assistant_question_kind_with_mode(question, history, AssistantReasoningMode::Basic)
+}
+
+fn unique_assistant_tools(tools: Vec<AssistantTool>) -> Vec<AssistantTool> {
+    let mut unique = Vec::new();
+    for tool in tools {
+        if !unique.contains(&tool) {
+            unique.push(tool);
+        }
+    }
+    unique
+}
+
+fn map_question_kind_to_tools(kind: AssistantQuestionKind) -> Vec<AssistantTool> {
+    match kind {
+        AssistantQuestionKind::StageSummary => {
+            vec![
+                AssistantTool::Review,
+                AssistantTool::Intents,
+                AssistantTool::Memory,
+            ]
+        }
+        AssistantQuestionKind::OutcomeRecap => vec![
+            AssistantTool::Review,
+            AssistantTool::Intents,
+            AssistantTool::Todos,
+            AssistantTool::Memory,
+        ],
+        AssistantQuestionKind::ProcessRecap => {
+            vec![
+                AssistantTool::Sessions,
+                AssistantTool::Intents,
+                AssistantTool::Memory,
+            ]
+        }
+        AssistantQuestionKind::EvidenceQuery => vec![
+            AssistantTool::Memory,
+            AssistantTool::Sessions,
+            AssistantTool::Intents,
+        ],
+    }
+}
+
+fn detect_assistant_tools_with_history(
+    question: &str,
+    history: &[AssistantChatMessage],
+    mode: AssistantReasoningMode,
+) -> Vec<AssistantTool> {
+    let kind = detect_assistant_question_kind_with_mode(question, history, mode);
+    let context = build_question_analysis_context(question, history);
+    let mut tools = map_question_kind_to_tools(kind);
+
+    if ["session", "工作段", "时段", "切换"]
+        .iter()
+        .any(|pattern| context.contains(pattern))
+    {
+        tools.push(AssistantTool::Sessions);
+    }
+
+    if ["待办", "todo", "后续", "下一步", "没收口"]
+        .iter()
+        .any(|pattern| context.contains(pattern))
+    {
+        tools.push(AssistantTool::Todos);
+    }
+
+    if ["复盘", "总结", "回顾", "这周", "本周", "上周"]
+        .iter()
+        .any(|pattern| context.contains(pattern))
+    {
+        tools.push(AssistantTool::Review);
+    }
+
+    if ["重心", "方向", "主要工作", "主要做了什么"]
+        .iter()
+        .any(|pattern| context.contains(pattern))
+    {
+        tools.push(AssistantTool::Intents);
+    }
+
+    tools.push(AssistantTool::Memory);
+    unique_assistant_tools(tools)
 }
 
 fn summarize_sessions_for_prompt(sessions: &[WorkSession]) -> String {
@@ -615,6 +932,7 @@ fn summarize_todos_for_prompt(result: &TodoExtractionResult) -> String {
 
 fn build_assistant_prompt(
     question: &str,
+    question_kind: AssistantQuestionKind,
     history: &[AssistantChatMessage],
     date_from: Option<&str>,
     date_to: Option<&str>,
@@ -633,7 +951,8 @@ fn build_assistant_prompt(
     };
 
     let mut prompt = format!(
-        "用户问题：{question}\n数据时间范围：{range}（以下所有数据均在此范围内，超出范围的信息不可用）\n\n请直接回答用户的问题。严格基于以下数据，不要编造未出现的事实。证据不足时明确说明。\n"
+        "用户问题：{question}\n问题类型：{}\n数据时间范围：{range}（以下所有数据均在此范围内，超出范围的信息不可用）\n\n请用“分析复盘型”风格直接回答。严格基于以下数据，不要编造未出现的事实；证据不足时明确说明。\n",
+        question_kind.label()
     );
 
     let recent_history: Vec<_> = history.iter().rev().take(4).collect::<Vec<_>>();
@@ -656,8 +975,14 @@ fn build_assistant_prompt(
     }
 
     if !references.is_empty() {
+        let filtered_references = filter_reference_items(references, 5);
         prompt.push_str("\n【相关记忆】\n");
-        prompt.push_str(&format_memory_references(references));
+        if filtered_references.is_empty() {
+            prompt.push_str("直接命中的原始记录区分度不高，多数是窗口标题或菜单噪声，请优先参考阶段复盘、意图分布和工作段。\n");
+        } else {
+            let filtered = filtered_references.into_iter().cloned().collect::<Vec<_>>();
+            prompt.push_str(&format_memory_references(&filtered));
+        }
         prompt.push('\n');
     }
 
@@ -686,75 +1011,10 @@ fn build_assistant_prompt(
     }
 
     prompt.push_str(
-        "\n输出要求：\n1. 用中文回答，直接回应用户的问题，不要泛泛而谈。\n2. 使用清晰的 Markdown 排版（标题、列表、加粗等）。\n3. 先给结论，再给依据或关键发现。\n4. 列举时使用无序列表，一行一条。\n5. 不要提及内部分析工具名称。\n6. 不要虚构日期、任务或结果。\n",
+        "\n输出要求：\n1. 用中文回答，直接回应用户的问题，不要泛泛而谈。\n2. 使用清晰的 Markdown 排版（标题、列表、加粗等）。\n3. 必须按以下固定结构输出：`## 结论`、`## 结果概览`、`## 过程分析`、`## 依据补充`、`## 复盘总结`。\n4. 整体风格是“先结果，再过程”，每个结论自然带上依据，不要写成审计报告。\n5. 列举时使用无序列表，一行一条。\n6. 不要提及内部分析工具名称。\n7. 不要虚构日期、任务或结果。\n",
     );
 
     prompt
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum FallbackAnswerMode {
-    Todos,
-    Sessions,
-    Intents,
-    Memory,
-    Overview,
-}
-
-fn detect_fallback_answer_mode(question: &str) -> FallbackAnswerMode {
-    let normalized = question.trim().to_lowercase();
-
-    if ["待办", "todo", "跟进", "后续", "下一步", "next step"]
-        .iter()
-        .any(|pattern| normalized.contains(pattern))
-    {
-        return FallbackAnswerMode::Todos;
-    }
-
-    if ["session", "工作段", "时间段", "时段", "连续", "切换"]
-        .iter()
-        .any(|pattern| normalized.contains(pattern))
-    {
-        return FallbackAnswerMode::Sessions;
-    }
-
-    if [
-        "主要做了什么",
-        "最近在做什么",
-        "重心",
-        "方向",
-        "主要工作",
-        "复盘",
-        "总结",
-        "汇总",
-        "本周",
-        "上周",
-        "这周",
-    ]
-    .iter()
-    .any(|pattern| normalized.contains(pattern))
-    {
-        return FallbackAnswerMode::Intents;
-    }
-
-    if [
-        "什么时候",
-        "哪里",
-        "哪个",
-        "谁",
-        "记录",
-        "ocr",
-        "网页",
-        "链接",
-        "url",
-    ]
-    .iter()
-    .any(|pattern| normalized.contains(pattern))
-    {
-        return FallbackAnswerMode::Memory;
-    }
-
-    FallbackAnswerMode::Overview
 }
 
 fn build_reference_line(item: &MemorySearchItem) -> String {
@@ -774,103 +1034,120 @@ fn build_reference_line(item: &MemorySearchItem) -> String {
     line
 }
 
-fn append_reference_section(answer: &mut String, references: &[MemorySearchItem], title: &str) {
-    if references.is_empty() {
+fn push_markdown_section(answer: &mut String, title: &str, lines: Vec<String>, empty_text: &str) {
+    answer.push_str(title);
+    answer.push_str("\n\n");
+
+    if lines.is_empty() {
+        answer.push_str(empty_text);
+        answer.push_str("\n\n");
         return;
     }
 
-    answer.push_str(title);
-    answer.push_str("\n\n");
-    for item in references.iter().take(5) {
-        answer.push_str(&build_reference_line(item));
-        answer.push('\n');
-    }
-    answer.push('\n');
-}
-
-fn append_session_section(answer: &mut String, sessions: &[WorkSession], title: &str) {
-    if sessions.is_empty() {
-        return;
-    }
-
-    answer.push_str(title);
-    answer.push_str("\n\n");
-    for session in sessions.iter().take(5) {
-        answer.push_str(&format!(
-            "- **{}**：{}，主要使用 {}（{}）\n",
-            session.title,
-            crate::analysis::format_duration(session.duration),
-            session.dominant_app,
-            session.intent_label
-        ));
-    }
-    answer.push('\n');
-}
-
-fn append_intent_section(answer: &mut String, intents: &IntentAnalysisResult, title: &str) {
-    if intents.summary.is_empty() {
-        return;
-    }
-
-    answer.push_str(title);
-    answer.push_str("\n\n");
-    for item in intents.summary.iter().take(5) {
-        answer.push_str(&format!(
-            "- **{}**：{}，{} 段\n",
-            item.label,
-            crate::analysis::format_duration(item.duration),
-            item.session_count
-        ));
-    }
-    answer.push('\n');
-}
-
-fn append_todo_section(answer: &mut String, todos: &TodoExtractionResult, title: &str) {
-    if todos.items.is_empty() {
-        return;
-    }
-
-    answer.push_str(title);
-    answer.push_str("\n\n");
-    for item in todos.items.iter().take(8) {
-        answer.push_str(&format!(
-            "- **{}**（{}，{}）\n",
-            item.title, item.date, item.reason
-        ));
-    }
-    answer.push('\n');
-}
-
-fn append_review_section(answer: &mut String, review: &WeeklyReviewResult) {
-    answer.push_str("## 阶段概览\n\n");
-    answer.push_str(&format!(
-        "- 总投入：{}\n- 活跃天数：{} 天\n- Session 数：{}\n- 深度工作段：{}\n",
-        crate::analysis::format_duration(review.total_duration),
-        review.active_days,
-        review.session_count,
-        review.deep_work_sessions
-    ));
-    answer.push('\n');
-
-    if !review.highlights.is_empty() {
-        answer.push_str("## 重点工作\n\n");
-        for item in review.highlights.iter().take(4) {
-            answer.push_str(&format!("- {}\n", item));
+    for line in lines {
+        if line.starts_with("- ") || line.starts_with("> ") {
+            answer.push_str(&line);
+        } else {
+            answer.push_str("- ");
+            answer.push_str(&line);
         }
         answer.push('\n');
     }
+    answer.push('\n');
+}
 
-    if !review.risks.is_empty() {
-        answer.push_str("## 风险与提醒\n\n");
-        for item in review.risks.iter().take(3) {
-            answer.push_str(&format!("- {}\n", item));
-        }
-        answer.push('\n');
-    }
+fn collect_reference_lines(references: &[MemorySearchItem], limit: usize) -> Vec<String> {
+    filter_reference_items(references, limit)
+        .into_iter()
+        .map(build_reference_line)
+        .collect()
+}
+
+fn collect_session_lines(sessions: Option<&[WorkSession]>, limit: usize) -> Vec<String> {
+    sessions
+        .unwrap_or(&[])
+        .iter()
+        .take(limit)
+        .map(|session| {
+            format!(
+                "**{}**：{}，主要使用 {}，意图为 {}",
+                session.title,
+                crate::analysis::format_duration(session.duration),
+                session.dominant_app,
+                session.intent_label
+            )
+        })
+        .collect()
+}
+
+fn collect_intent_lines(intents: Option<&IntentAnalysisResult>, limit: usize) -> Vec<String> {
+    intents
+        .map(|result| {
+            result
+                .summary
+                .iter()
+                .take(limit)
+                .map(|item| {
+                    format!(
+                        "**{}**：{}，{} 段",
+                        item.label,
+                        crate::analysis::format_duration(item.duration),
+                        item.session_count
+                    )
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
+fn collect_todo_lines(todos: Option<&TodoExtractionResult>, limit: usize) -> Vec<String> {
+    todos
+        .map(|result| {
+            result
+                .items
+                .iter()
+                .take(limit)
+                .map(|item| format!("**{}**（{}，{}）", item.title, item.date, item.reason))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
+fn collect_review_lines(review: Option<&WeeklyReviewResult>) -> Vec<String> {
+    review
+        .map(|result| {
+            let mut lines = vec![format!(
+                "总投入 {}，活跃 {} 天，累计 {} 个 session，深度工作 {} 段",
+                crate::analysis::format_duration(result.total_duration),
+                result.active_days,
+                result.session_count,
+                result.deep_work_sessions
+            )];
+
+            lines.extend(
+                result
+                    .highlights
+                    .iter()
+                    .take(3)
+                    .map(|item| format!("阶段重点：{item}")),
+            );
+
+            lines.extend(
+                result
+                    .risks
+                    .iter()
+                    .take(2)
+                    .map(|item| format!("需要留意：{item}")),
+            );
+
+            lines
+        })
+        .unwrap_or_default()
 }
 
 fn build_fallback_assistant_answer(
     question: &str,
+    question_kind: AssistantQuestionKind,
     references: &[MemorySearchItem],
     sessions: Option<&[WorkSession]>,
     intents: Option<&IntentAnalysisResult>,
@@ -878,140 +1155,174 @@ fn build_fallback_assistant_answer(
     todos: Option<&TodoExtractionResult>,
     _tool_labels: &[String],
 ) -> String {
-    let has_review = review.is_some();
-    let has_intents = intents.map_or(false, |i| !i.summary.is_empty());
-    let has_todos = todos.map_or(false, |t| !t.items.is_empty());
-    let has_sessions = sessions.map_or(false, |s| !s.is_empty());
-    let has_refs = !references.is_empty();
-
-    if !has_review && !has_intents && !has_todos && !has_sessions && !has_refs {
-        return format!(
-            "未找到和\"{question}\"相关的记录。\n\n可尝试换一个关键词，或调整日期范围后再试。"
-        );
-    }
-
     let mut answer = String::new();
-    let requested_mode = detect_fallback_answer_mode(question);
-    let effective_mode = match requested_mode {
-        FallbackAnswerMode::Todos if has_todos => FallbackAnswerMode::Todos,
-        FallbackAnswerMode::Sessions if has_sessions => FallbackAnswerMode::Sessions,
-        FallbackAnswerMode::Intents if has_intents || has_review => FallbackAnswerMode::Intents,
-        FallbackAnswerMode::Memory if has_refs => FallbackAnswerMode::Memory,
-        _ if has_todos => FallbackAnswerMode::Todos,
-        _ if has_intents || has_review => FallbackAnswerMode::Intents,
-        _ if has_sessions => FallbackAnswerMode::Sessions,
-        _ => FallbackAnswerMode::Memory,
-    };
+    let intent_lines = collect_intent_lines(intents, 3);
+    let session_lines = collect_session_lines(sessions, 3);
+    let todo_lines = collect_todo_lines(todos, 3);
+    let review_lines = collect_review_lines(review);
+    let reference_lines = collect_reference_lines(references, 5);
 
-    answer.push_str("## 结论\n\n");
-
-    match effective_mode {
-        FallbackAnswerMode::Todos => {
-            answer.push_str(
-                "从基础模板能直接提取到的待跟进事项看，当前更值得继续推进的是下面这些。\n\n",
-            );
-            if let Some(todos) = todos {
-                for item in todos.items.iter().take(3) {
-                    answer.push_str(&format!("- **{}**\n", item.title));
-                }
-                answer.push('\n');
-            }
-        }
-        FallbackAnswerMode::Sessions => {
-            answer
-                .push_str("按连续工作段看，和这次问题最相关的内容主要集中在下面几个 session。\n\n");
-            if let Some(sessions) = sessions {
-                for session in sessions.iter().take(3) {
-                    answer.push_str(&format!(
-                        "- **{}**：{}\n",
-                        session.title,
-                        crate::analysis::format_duration(session.duration)
-                    ));
-                }
-                answer.push('\n');
-            }
-        }
-        FallbackAnswerMode::Intents => {
-            if let Some(intents) = intents {
-                let summary = intents
-                    .summary
-                    .iter()
-                    .take(3)
-                    .map(|item| {
-                        format!(
-                            "{}（{}）",
-                            item.label,
-                            crate::analysis::format_duration(item.duration)
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join("、");
-                if !summary.is_empty() {
-                    answer.push_str(&format!(
-                        "从现有记录看，当前工作重心主要集中在 {summary}。\n\n"
-                    ));
-                } else {
-                    answer.push_str("从现有记录看，近期工作有比较明确的重心，下面给你展开。\n\n");
-                }
+    let conclusion_lines = match question_kind {
+        AssistantQuestionKind::StageSummary => {
+            if !intent_lines.is_empty() {
+                vec![format!(
+                    "围绕“{question}”来看，这段时间的主线工作主要集中在 {}。",
+                    intent_lines
+                        .iter()
+                        .take(2)
+                        .map(|line| line.replace("- ", ""))
+                        .collect::<Vec<_>>()
+                        .join("、")
+                )]
+            } else if !review_lines.is_empty() {
+                vec![
+                    "当前记录能看到明确的阶段性主线，但细节主要来自复盘摘要而不是细粒度分类。"
+                        .to_string(),
+                ]
             } else {
-                answer.push_str("从现有记录看，近期工作有比较明确的重心，下面给你展开。\n\n");
+                vec!["当前记录不足以完整还原阶段主线，只能给出有限概览。".to_string()]
             }
         }
-        FallbackAnswerMode::Memory => {
-            answer.push_str(&format!(
-                "基础模板下，和“{question}”最相关的是下面这些直接命中的记录。\n\n"
-            ));
+        AssistantQuestionKind::OutcomeRecap => {
+            if !todo_lines.is_empty() {
+                vec![
+                    "当前更像是“已有阶段结果 + 仍有收口事项”的状态。".to_string(),
+                    format!("未完全收口的重点主要有：{}。", todo_lines.join("、")),
+                ]
+            } else if !review_lines.is_empty() {
+                vec!["能确认有阶段性推进结果，但未提取到明确的待收口事项。".to_string()]
+            } else {
+                vec!["当前记录能看到零散进展，但不足以明确界定阶段结果。".to_string()]
+            }
         }
-        FallbackAnswerMode::Overview => {
-            answer.push_str(
-                "从现有记录看，近期工作有一些比较明确的重点，下面按概览和直接记录展开。\n\n",
-            );
+        AssistantQuestionKind::ProcessRecap => {
+            if !session_lines.is_empty() {
+                vec![
+                    "这段时间更像是围绕少数主题持续推进，而不是完全碎片化切换。".to_string(),
+                    format!("最典型的推进片段包括：{}。", session_lines.join("、")),
+                ]
+            } else if !intent_lines.is_empty() {
+                vec!["时间投入方向是可见的，但缺少足够的连续工作段来还原完整过程。".to_string()]
+            } else {
+                vec!["当前记录不足以支撑过程复盘，只能看到零散痕迹。".to_string()]
+            }
         }
-    }
+        AssistantQuestionKind::EvidenceQuery => {
+            if !reference_lines.is_empty() {
+                vec![
+                    "当前结论主要来自直接命中的活动记录，以及能对上时间段的 session / 意图摘要。"
+                        .to_string(),
+                    "下面我会把可回溯的依据按记录、过程和阶段摘要拆开列出。".to_string(),
+                ]
+            } else {
+                vec!["当前没有足够的直接命中记录，因此依据链条偏弱。".to_string()]
+            }
+        }
+    };
+    push_markdown_section(
+        &mut answer,
+        "## 结论",
+        conclusion_lines,
+        "暂无足够记录支撑结论。",
+    );
 
-    match effective_mode {
-        FallbackAnswerMode::Todos => {
-            if let Some(todos) = todos {
-                append_todo_section(&mut answer, todos, "## 待跟进事项");
-            }
-            append_reference_section(&mut answer, references, "## 相关记录");
+    let overview_lines = match question_kind {
+        AssistantQuestionKind::StageSummary => {
+            let mut lines = review_lines.clone();
+            lines.extend(intent_lines.clone());
+            lines
         }
-        FallbackAnswerMode::Sessions => {
-            if let Some(sessions) = sessions {
-                append_session_section(&mut answer, sessions, "## 代表性 Session");
-            }
-            append_reference_section(&mut answer, references, "## 相关记录");
+        AssistantQuestionKind::OutcomeRecap => {
+            let mut lines = review_lines.clone();
+            lines.extend(todo_lines.clone());
+            lines
         }
-        FallbackAnswerMode::Intents => {
-            if let Some(review) = review {
-                append_review_section(&mut answer, review);
-            }
-            if let Some(intents) = intents {
-                append_intent_section(&mut answer, intents, "## 主要工作方向");
-            }
-            append_reference_section(&mut answer, references, "## 相关记录");
+        AssistantQuestionKind::ProcessRecap => {
+            let mut lines = intent_lines.clone();
+            lines.extend(session_lines.clone());
+            lines
         }
-        FallbackAnswerMode::Memory => {
-            append_reference_section(&mut answer, references, "## 相关记录");
-            if let Some(sessions) = sessions {
-                append_session_section(&mut answer, sessions, "## 可能相关的工作段");
-            }
+        AssistantQuestionKind::EvidenceQuery => {
+            let mut lines = reference_lines.clone();
+            lines.extend(review_lines.iter().take(2).cloned());
+            lines
         }
-        FallbackAnswerMode::Overview => {
-            if let Some(review) = review {
-                append_review_section(&mut answer, review);
-            }
-            if let Some(intents) = intents {
-                append_intent_section(&mut answer, intents, "## 主要工作方向");
-            }
-            if let Some(sessions) = sessions {
-                append_session_section(&mut answer, sessions, "## 代表性 Session");
-            }
-            append_reference_section(&mut answer, references, "## 相关记录");
-        }
-    }
+    };
+    push_markdown_section(
+        &mut answer,
+        "## 结果概览",
+        overview_lines,
+        "暂无足够记录形成结果概览。",
+    );
 
-    answer.push_str("\n> 当前为基础回答模式，如需更精准的分析归纳，可切换到 AI 增强模式。");
+    let process_lines = match question_kind {
+        AssistantQuestionKind::StageSummary | AssistantQuestionKind::OutcomeRecap => {
+            let mut lines = session_lines.clone();
+            lines.extend(intent_lines.clone());
+            lines
+        }
+        AssistantQuestionKind::ProcessRecap => {
+            let mut lines = session_lines.clone();
+            lines.extend(review_lines.iter().take(2).cloned());
+            lines
+        }
+        AssistantQuestionKind::EvidenceQuery => {
+            let mut lines = session_lines.clone();
+            lines.extend(intent_lines.clone());
+            lines
+        }
+    };
+    push_markdown_section(
+        &mut answer,
+        "## 过程分析",
+        process_lines,
+        "暂无足够的过程记录可用于复盘。",
+    );
+
+    let evidence_lines = if !reference_lines.is_empty() {
+        reference_lines
+    } else if references.iter().any(is_low_signal_reference) {
+        vec![
+            "直接命中的原始记录区分度不高，当前不展开逐条标题，以免窗口壳和菜单词干扰判断。"
+                .to_string(),
+        ]
+    } else if !review_lines.is_empty() {
+        review_lines.iter().take(3).cloned().collect()
+    } else {
+        Vec::new()
+    };
+    push_markdown_section(
+        &mut answer,
+        "## 依据补充",
+        evidence_lines,
+        "当前没有检索到可直接引用的记录依据。",
+    );
+
+    let recap_lines = match question_kind {
+        AssistantQuestionKind::StageSummary => vec![
+            "整体看，这更像是围绕同一条主线持续推进，而不是大范围切题。".to_string(),
+            "如果后续继续追问某个模块，我可以再把对应记录单独展开。".to_string(),
+        ],
+        AssistantQuestionKind::OutcomeRecap => vec![
+            "当前更适合把它理解为“阶段推进中”，而不是“已经全部收口”。".to_string(),
+            "记录能说明结果轮廓，但具体完成定义仍取决于后续补充追问。".to_string(),
+        ],
+        AssistantQuestionKind::ProcessRecap => vec![
+            "从可见记录看，过程脉络比单点结果更清晰。".to_string(),
+            "如果需要，我可以继续把关键时间段按先后顺序串起来。".to_string(),
+        ],
+        AssistantQuestionKind::EvidenceQuery => vec![
+            "当前结论并不是凭空概括，而是来自直接记录命中与阶段摘要的交叉印证。".to_string(),
+            "如果你要继续核对，我更适合沿着具体记录或具体时间段往下展开。".to_string(),
+        ],
+    };
+    push_markdown_section(
+        &mut answer,
+        "## 复盘总结",
+        recap_lines,
+        "暂无进一步复盘总结。",
+    );
+
     answer
 }
 
@@ -1692,7 +2003,10 @@ pub async fn chat_work_assistant(
         (auto_from, auto_to)
     };
 
-    let tools = detect_assistant_tools_with_history(&trimmed_question, &history);
+    let reasoning_mode = assistant_reasoning_mode(model_config.as_ref());
+    let question_kind =
+        detect_assistant_question_kind_with_mode(&trimmed_question, &history, reasoning_mode);
+    let tools = detect_assistant_tools_with_history(&trimmed_question, &history, reasoning_mode);
     let search_query = build_contextual_query(&trimmed_question, &history);
     let (references, sessions, intents, review, todos) = {
         let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
@@ -1769,6 +2083,7 @@ pub async fn chat_work_assistant(
         if is_text_model_available(ai_model) {
             let prompt = build_assistant_prompt(
                 &trimmed_question,
+                question_kind,
                 &history,
                 date_from.as_deref(),
                 date_to.as_deref(),
@@ -1802,6 +2117,7 @@ pub async fn chat_work_assistant(
     Ok(AssistantAnswer {
         answer: build_fallback_assistant_answer(
             &trimmed_question,
+            question_kind,
             &references,
             sessions.as_deref(),
             intents.as_ref(),
@@ -4288,7 +4604,143 @@ async fn get_app_icon_impl(
 
 #[cfg(test)]
 mod tests {
-    use super::{build_windows_icon_cache_key, merge_windows_icon_lookup_candidates};
+    use super::{
+        build_fallback_assistant_answer, build_windows_icon_cache_key,
+        detect_assistant_question_kind, detect_assistant_question_kind_with_mode,
+        merge_windows_icon_lookup_candidates, AssistantChatMessage, AssistantQuestionKind,
+        AssistantReasoningMode,
+    };
+    use crate::database::MemorySearchItem;
+    use crate::work_intelligence::{
+        IntentAnalysisResult, IntentSummary, NamedDuration, WeeklyReviewResult, WorkSession,
+    };
+
+    fn sample_review() -> WeeklyReviewResult {
+        WeeklyReviewResult {
+            title: "阶段复盘".to_string(),
+            markdown: "本周主要推进了助手回答链路改造。".to_string(),
+            total_duration: 6 * 3600,
+            active_days: 3,
+            session_count: 5,
+            deep_work_sessions: 2,
+            top_intents: vec![IntentSummary {
+                label: "编码开发".to_string(),
+                duration: 4 * 3600,
+                session_count: 3,
+            }],
+            top_apps: vec![NamedDuration {
+                name: "VS Code".to_string(),
+                duration: 4 * 3600,
+            }],
+            highlights: vec!["完成助手回答链路重构设计".to_string()],
+            risks: vec!["追问场景仍依赖关键词".to_string()],
+        }
+    }
+
+    fn sample_intents() -> IntentAnalysisResult {
+        IntentAnalysisResult {
+            sessions: vec![],
+            summary: vec![IntentSummary {
+                label: "编码开发".to_string(),
+                duration: 4 * 3600,
+                session_count: 3,
+            }],
+        }
+    }
+
+    fn sample_sessions() -> Vec<WorkSession> {
+        vec![WorkSession {
+            session_id: "2026-03-27-1".to_string(),
+            date: "2026-03-27".to_string(),
+            start_timestamp: 1_711_500_000,
+            end_timestamp: 1_711_503_600,
+            duration: 3600,
+            activity_count: 4,
+            app_count: 2,
+            dominant_app: "VS Code".to_string(),
+            dominant_category: "development".to_string(),
+            title: "重构助手回答链路".to_string(),
+            browser_domains: vec!["github.com".to_string()],
+            top_apps: vec![NamedDuration {
+                name: "VS Code".to_string(),
+                duration: 3000,
+            }],
+            top_keywords: vec!["assistant".to_string()],
+            intent_label: "编码开发".to_string(),
+            intent_confidence: 88,
+            intent_evidence: vec!["修改 commands.rs".to_string()],
+        }]
+    }
+
+    fn sample_references() -> Vec<MemorySearchItem> {
+        vec![MemorySearchItem {
+            source_type: "activity".to_string(),
+            source_id: Some(1),
+            date: "2026-03-27".to_string(),
+            timestamp: 1_711_503_600,
+            title: "重构助手回答链路".to_string(),
+            excerpt: "完成问题分类和回答骨架调整".to_string(),
+            app_name: Some("VS Code".to_string()),
+            browser_url: None,
+            duration: Some(3600),
+            score: 120,
+        }]
+    }
+
+    fn sample_noisy_references() -> Vec<MemorySearchItem> {
+        vec![
+            MemorySearchItem {
+                source_type: "activity".to_string(),
+                source_id: Some(2),
+                date: "2026-03-27".to_string(),
+                timestamp: 1_711_504_200,
+                title: "../Pycharm_Project/Work_Review/src-tauri".to_string(),
+                excerpt: "编辑 显示 通知 窗口 帮助 Work Review 记录 分析 证明 记录状态 暂停 时间线 日报".to_string(),
+                app_name: Some("cmux".to_string()),
+                browser_url: None,
+                duration: Some(1800),
+                score: 100,
+            },
+            MemorySearchItem {
+                source_type: "activity".to_string(),
+                source_id: Some(3),
+                date: "2026-03-27".to_string(),
+                timestamp: 1_711_504_500,
+                title: "无标题 - Google Chrome - momoi".to_string(),
+                excerpt: "Chrome 文件 编辑 显示 历史记录 书签 个人资料 标签页 窗口 帮助 Work Review 记录 分析".to_string(),
+                app_name: Some("Google Chrome".to_string()),
+                browser_url: None,
+                duration: Some(900),
+                score: 96,
+            },
+        ]
+    }
+
+    fn sample_process_follow_up_history() -> Vec<AssistantChatMessage> {
+        vec![
+            AssistantChatMessage {
+                role: "user".to_string(),
+                content: "最近时间主要花在哪？".to_string(),
+            },
+            AssistantChatMessage {
+                role: "assistant".to_string(),
+                content: "## 结论\n\n- 这段时间更像是围绕少数主题持续推进。\n\n## 过程分析\n\n- 主要是编码开发相关 session。\n".to_string(),
+            },
+        ]
+    }
+
+    fn sample_stage_follow_up_history() -> Vec<AssistantChatMessage> {
+        vec![
+            AssistantChatMessage {
+                role: "user".to_string(),
+                content: "这周主要做了什么？".to_string(),
+            },
+            AssistantChatMessage {
+                role: "assistant".to_string(),
+                content: "## 结论\n\n- 这周主线是助手回答链路改造。\n".to_string(),
+            },
+        ]
+    }
 
     #[test]
     fn windows图标候选应优先真实路径并去重() {
@@ -4322,6 +4774,119 @@ mod tests {
         assert_ne!(portable_key, installed_key);
         assert!(portable_key.starts_with("VS_Code_"));
         assert!(installed_key.starts_with("VS_Code_"));
+    }
+
+    #[test]
+    fn 助手问题分类应识别阶段总结与过程复盘和证据追问() {
+        assert_eq!(
+            detect_assistant_question_kind("这周主要做了什么？", &[]),
+            AssistantQuestionKind::StageSummary
+        );
+        assert_eq!(
+            detect_assistant_question_kind("最近时间主要花在哪？", &[]),
+            AssistantQuestionKind::ProcessRecap
+        );
+        assert_eq!(
+            detect_assistant_question_kind("这个结论的依据是什么？", &[]),
+            AssistantQuestionKind::EvidenceQuery
+        );
+    }
+
+    #[test]
+    fn 助手问题分类应继承上一轮过程复盘语境() {
+        let history = sample_process_follow_up_history();
+
+        assert_eq!(
+            detect_assistant_question_kind("继续", &history),
+            AssistantQuestionKind::ProcessRecap
+        );
+        assert_eq!(
+            detect_assistant_question_kind("展开说说这个", &history),
+            AssistantQuestionKind::ProcessRecap
+        );
+    }
+
+    #[test]
+    fn 助手问题分类应将依据追问优先识别为证据问题() {
+        let history = sample_stage_follow_up_history();
+
+        assert_eq!(
+            detect_assistant_question_kind("那依据呢", &history),
+            AssistantQuestionKind::EvidenceQuery
+        );
+        assert_eq!(
+            detect_assistant_question_kind("这个结论怎么得出的", &history),
+            AssistantQuestionKind::EvidenceQuery
+        );
+    }
+
+    #[test]
+    fn ai增强识别器应比基础模板更强承接助手上下文() {
+        let history = vec![
+            AssistantChatMessage {
+                role: "user".to_string(),
+                content: "这周主要做了什么？".to_string(),
+            },
+            AssistantChatMessage {
+                role: "assistant".to_string(),
+                content: "## 结论\n\n- 这周主线是助手回答链路改造。\n\n## 过程分析\n\n- 主要是编码开发相关 session。\n".to_string(),
+            },
+        ];
+
+        assert_eq!(
+            detect_assistant_question_kind_with_mode(
+                "展开说说这个",
+                &history,
+                AssistantReasoningMode::Basic
+            ),
+            AssistantQuestionKind::StageSummary
+        );
+        assert_eq!(
+            detect_assistant_question_kind_with_mode(
+                "展开说说这个",
+                &history,
+                AssistantReasoningMode::AiEnhanced
+            ),
+            AssistantQuestionKind::ProcessRecap
+        );
+    }
+
+    #[test]
+    fn 复盘型基础回答应输出统一章节骨架() {
+        let answer = build_fallback_assistant_answer(
+            "这周主要做了什么？",
+            AssistantQuestionKind::StageSummary,
+            &sample_references(),
+            Some(&sample_sessions()),
+            Some(&sample_intents()),
+            Some(&sample_review()),
+            None,
+            &["周报复盘".to_string()],
+        );
+
+        assert!(answer.contains("## 结论"));
+        assert!(answer.contains("## 结果概览"));
+        assert!(answer.contains("## 过程分析"));
+        assert!(answer.contains("## 依据补充"));
+        assert!(answer.contains("## 复盘总结"));
+    }
+
+    #[test]
+    fn 低信噪比原始记录不应直接出现在依据补充中() {
+        let answer = build_fallback_assistant_answer(
+            "这周主要做了什么？",
+            AssistantQuestionKind::StageSummary,
+            &sample_noisy_references(),
+            Some(&sample_sessions()),
+            Some(&sample_intents()),
+            Some(&sample_review()),
+            None,
+            &["周报复盘".to_string()],
+        );
+
+        assert!(!answer.contains("../Pycharm_Project/Work_Review/src-tauri"));
+        assert!(!answer.contains("无标题 - Google Chrome - momoi"));
+        assert!(answer.contains("直接命中的原始记录区分度不高"));
     }
 }
 

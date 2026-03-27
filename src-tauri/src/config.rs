@@ -573,7 +573,8 @@ fn same_model_config(left: &ModelConfig, right: &ModelConfig) -> bool {
     left.provider == right.provider
         && left.endpoint.trim() == right.endpoint.trim()
         && left.model.trim() == right.model.trim()
-        && left.api_key.as_deref().unwrap_or("").trim() == right.api_key.as_deref().unwrap_or("").trim()
+        && left.api_key.as_deref().unwrap_or("").trim()
+            == right.api_key.as_deref().unwrap_or("").trim()
 }
 
 fn default_profile_name(model_config: &ModelConfig) -> String {

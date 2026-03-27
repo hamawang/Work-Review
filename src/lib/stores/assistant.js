@@ -8,6 +8,15 @@ const DEFAULT_STATE = {
   selectedModelId: BASIC_ASSISTANT_MODEL_ID,
 };
 
+function normalizeMessage(message) {
+  return {
+    ...message,
+    cards: Array.isArray(message?.cards) ? message.cards : [],
+    references: Array.isArray(message?.references) ? message.references : [],
+    toolLabels: Array.isArray(message?.toolLabels) ? message.toolLabels : [],
+  };
+}
+
 function loadState() {
   if (typeof window === 'undefined') {
     return DEFAULT_STATE;
@@ -21,7 +30,9 @@ function loadState() {
 
     const parsed = JSON.parse(raw);
     return {
-      messages: Array.isArray(parsed?.messages) ? parsed.messages : [],
+      messages: Array.isArray(parsed?.messages)
+        ? parsed.messages.map((message) => normalizeMessage(message))
+        : [],
       selectedModelId:
         typeof parsed?.selectedModelId === 'string' && parsed.selectedModelId.trim()
           ? parsed.selectedModelId
@@ -57,7 +68,7 @@ function createAssistantStore() {
     appendMessage: (message) =>
       update((state) => ({
         ...state,
-        messages: [...state.messages, message].slice(-40),
+        messages: [...state.messages, normalizeMessage(message)].slice(-40),
       })),
     clearMessages: () =>
       update((state) => ({
@@ -75,7 +86,9 @@ function createAssistantStore() {
     setMessages: (messages) =>
       update((state) => ({
         ...state,
-        messages: Array.isArray(messages) ? messages.slice(-40) : [],
+        messages: Array.isArray(messages)
+          ? messages.slice(-40).map((message) => normalizeMessage(message))
+          : [],
       })),
     reset: () => set(DEFAULT_STATE),
   };

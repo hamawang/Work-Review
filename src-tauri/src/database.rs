@@ -187,6 +187,22 @@ fn parse_date_bounds(date_from: Option<&str>, date_to: Option<&str>) -> (Option<
     (start_ts, end_ts)
 }
 
+fn calculate_overlap_duration(
+    interval_end: i64,
+    duration: i64,
+    range_start: i64,
+    range_end: i64,
+) -> i64 {
+    if duration <= 0 || range_end <= range_start {
+        return 0;
+    }
+
+    let interval_start = interval_end.saturating_sub(duration);
+    let overlap_start = interval_start.max(range_start);
+    let overlap_end = interval_end.min(range_end);
+    (overlap_end - overlap_start).max(0)
+}
+
 fn tokenize_memory_query(query: &str) -> Vec<String> {
     query
         .split_whitespace()
@@ -863,58 +879,94 @@ impl Database {
         let work_start_ts = safe_local_timestamp(date_parsed.and_hms_opt(ws, wsm, 0).unwrap());
         let work_end_ts = safe_local_timestamp(date_parsed.and_hms_opt(we, wem, 0).unwrap());
 
-        // 获取总时长和截图数
-        let (total_duration, screenshot_count): (i64, i64) = conn.query_row(
-            "SELECT COALESCE(SUM(duration), 0), COUNT(*) FROM activities WHERE timestamp >= ?1 AND timestamp < ?2",
+        // 截图数量仍按截图发生的自然日统计
+        let screenshot_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM activities WHERE timestamp >= ?1 AND timestamp < ?2",
             params![start_ts, end_ts],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )?;
-
-        // 获取工作时间内的活动时长
-        let work_time_duration: i64 = conn.query_row(
-            "SELECT COALESCE(SUM(duration), 0) FROM activities WHERE timestamp >= ?1 AND timestamp < ?2",
-            params![work_start_ts, work_end_ts],
             |row| row.get(0),
-        ).unwrap_or(0);
-
-        // 获取应用使用统计
-        let mut stmt = conn.prepare(
-            "SELECT app_name,
-                    COALESCE(executable_path, '') as executable_path,
-                    SUM(duration) as total_duration,
-                    COUNT(*) as count,
-                    MAX(timestamp) as latest_timestamp
-             FROM activities
-             WHERE timestamp >= ?1 AND timestamp < ?2
-             GROUP BY app_name, COALESCE(executable_path, '')
-             ORDER BY total_duration DESC",
         )?;
 
-        let app_usage_rows: Vec<(AppUsage, i64)> = stmt
+        let mut stmt = conn.prepare(
+            "SELECT timestamp,
+                    app_name,
+                    window_title,
+                    ocr_text,
+                    category,
+                    duration,
+                    browser_url,
+                    executable_path
+             FROM activities
+             WHERE timestamp > ?1 AND timestamp - duration < ?2
+             ORDER BY timestamp DESC",
+        )?;
+
+        let activity_rows: Vec<(
+            i64,
+            String,
+            String,
+            Option<String>,
+            String,
+            i64,
+            Option<String>,
+            Option<String>,
+        )> = stmt
             .query_map(params![start_ts, end_ts], |row| {
-                let executable_path: String = row.get(1)?;
                 Ok((
-                    AppUsage {
-                        app_name: row.get(0)?,
-                        duration: row.get(2)?,
-                        count: row.get(3)?,
-                        executable_path: if executable_path.is_empty() {
-                            None
-                        } else {
-                            Some(executable_path)
-                        },
-                    },
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
                     row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
                 ))
             })?
             .filter_map(|r| r.ok())
             .collect();
 
-        // 在 Rust 侧按显示名再次聚合，避免 work-review / Work Review 等别名被拆成多条
+        let mut total_duration = 0i64;
+        let mut work_time_duration = 0i64;
         let mut app_usage_map: std::collections::HashMap<String, (AppUsage, i64)> =
             std::collections::HashMap::new();
-        for (usage, latest_timestamp) in app_usage_rows {
-            let normalized_name = crate::monitor::normalize_display_app_name(&usage.app_name);
+        let mut category_usage_map: std::collections::HashMap<String, i64> =
+            std::collections::HashMap::new();
+        let mut browser_duration = 0i64;
+        let mut browser_map: std::collections::HashMap<
+            String,
+            std::collections::HashMap<String, std::collections::HashMap<String, i64>>,
+        > = std::collections::HashMap::new();
+        let mut browser_duration_map: std::collections::HashMap<String, i64> =
+            std::collections::HashMap::new();
+        let mut browser_path_map: std::collections::HashMap<String, (Option<String>, i64)> =
+            std::collections::HashMap::new();
+        let mut url_duration_map: std::collections::HashMap<String, i64> =
+            std::collections::HashMap::new();
+
+        for (
+            timestamp,
+            app_name,
+            window_title,
+            ocr_text,
+            category,
+            duration,
+            browser_url,
+            executable_path,
+        ) in activity_rows
+        {
+            let day_duration = calculate_overlap_duration(timestamp, duration, start_ts, end_ts);
+            if day_duration <= 0 {
+                continue;
+            }
+
+            total_duration += day_duration;
+
+            if work_end_ts > work_start_ts {
+                work_time_duration +=
+                    calculate_overlap_duration(timestamp, duration, work_start_ts, work_end_ts);
+            }
+
+            let normalized_name = crate::monitor::normalize_display_app_name(&app_name);
             let entry = app_usage_map.entry(normalized_name.clone()).or_insert((
                 AppUsage {
                     app_name: normalized_name,
@@ -924,14 +976,49 @@ impl Database {
                 },
                 0,
             ));
-            entry.0.duration += usage.duration;
-            entry.0.count += usage.count;
-            if latest_timestamp >= entry.1 {
-                entry.0.executable_path = usage.executable_path.clone();
-                entry.1 = latest_timestamp;
+            entry.0.duration += day_duration;
+            entry.0.count += 1;
+            if timestamp >= entry.1 {
+                entry.0.executable_path = executable_path.clone();
+                entry.1 = timestamp;
+            }
+
+            *category_usage_map.entry(category.clone()).or_insert(0) += day_duration;
+
+            if category == "browser" {
+                browser_duration += day_duration;
+                let normalized_browser_name = crate::monitor::normalize_display_app_name(&app_name);
+                *browser_duration_map
+                    .entry(normalized_browser_name.clone())
+                    .or_insert(0) += day_duration;
+                browser_path_map
+                    .entry(normalized_browser_name.clone())
+                    .or_insert((executable_path.clone(), timestamp));
+
+                let page_hint = browser_url
+                    .as_deref()
+                    .map(normalize_url)
+                    .filter(|url| !url.is_empty())
+                    .or_else(|| crate::monitor::infer_browser_page_hint(&window_title))
+                    .or_else(|| {
+                        ocr_text
+                            .as_deref()
+                            .and_then(crate::monitor::infer_browser_page_hint_from_text)
+                    });
+
+                let Some(page_hint) = page_hint else {
+                    continue;
+                };
+
+                let domain = crate::monitor::browser_page_domain_label(&page_hint);
+                let domain_map = browser_map.entry(normalized_browser_name).or_default();
+                let page_map = domain_map.entry(domain).or_default();
+                *page_map.entry(page_hint.clone()).or_insert(0) += day_duration;
+                *url_duration_map.entry(page_hint).or_insert(0) += day_duration;
             }
         }
 
+        // 在 Rust 侧按显示名再次聚合，避免 work-review / Work Review 等别名被拆成多条
         let mut app_usage: Vec<AppUsage> = app_usage_map
             .into_values()
             .map(|(usage, _)| usage)
@@ -943,116 +1030,18 @@ impl Database {
                 .then_with(|| a.app_name.cmp(&b.app_name))
         });
 
-        // 获取分类使用统计
-        let mut stmt = conn.prepare(
-            "SELECT category, SUM(duration) as total_duration 
-             FROM activities 
-             WHERE timestamp >= ?1 AND timestamp < ?2 
-             GROUP BY category 
-             ORDER BY total_duration DESC",
-        )?;
-
-        let category_usage: Vec<CategoryUsage> = stmt
-            .query_map(params![start_ts, end_ts], |row| {
-                Ok(CategoryUsage {
-                    category: row.get(0)?,
-                    duration: row.get(1)?,
-                })
-            })?
-            .filter_map(|r| r.ok())
+        let mut category_usage: Vec<CategoryUsage> = category_usage_map
+            .into_iter()
+            .map(|(category, duration)| CategoryUsage { category, duration })
             .collect();
-
-        // 计算浏览器总时长
-        let browser_duration: i64 = conn
-            .query_row(
-                "SELECT COALESCE(SUM(duration), 0) FROM activities 
-             WHERE timestamp >= ?1 AND timestamp < ?2 AND category = 'browser'",
-                params![start_ts, end_ts],
-                |row| row.get(0),
-            )
-            .unwrap_or(0);
-
-        // 网站访问统计采用两级兜底：
-        // 1. 优先使用已写入的 browser_url
-        // 2. browser_url 为空时，从窗口标题 / OCR 文本推断页面或站点
-        let mut browser_activity_stmt = conn.prepare(
-            "SELECT app_name, browser_url, window_title, ocr_text, duration, executable_path
-             FROM activities
-             WHERE timestamp >= ?1 AND timestamp < ?2
-               AND category = 'browser'
-             ORDER BY timestamp DESC",
-        )?;
-
-        let browser_activity_rows: Vec<(
-            String,
-            Option<String>,
-            String,
-            Option<String>,
-            i64,
-            Option<String>,
-        )> = browser_activity_stmt
-            .query_map(params![start_ts, end_ts], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, Option<String>>(3)?,
-                    row.get::<_, i64>(4)?,
-                    row.get::<_, Option<String>>(5)?,
-                ))
-            })?
-            .filter_map(|r| r.ok())
-            .collect();
-
-        // 按浏览器 -> 域名 -> URL 三级结构组织数据
-        // 结构: { browser_name: { domain: { url: duration } } }
-        let mut browser_map: std::collections::HashMap<
-            String,
-            std::collections::HashMap<String, std::collections::HashMap<String, i64>>,
-        > = std::collections::HashMap::new();
-        let mut browser_duration_map: std::collections::HashMap<String, i64> =
-            std::collections::HashMap::new();
-        let mut browser_path_map: std::collections::HashMap<String, Option<String>> =
-            std::collections::HashMap::new();
-        let mut url_duration_map: std::collections::HashMap<String, i64> =
-            std::collections::HashMap::new();
-
-        for (app_name, browser_url, window_title, ocr_text, duration, executable_path) in
-            browser_activity_rows
-        {
-            let normalized_browser_name = crate::monitor::normalize_display_app_name(&app_name);
-            *browser_duration_map
-                .entry(normalized_browser_name.clone())
-                .or_insert(0) += duration;
-            browser_path_map
-                .entry(normalized_browser_name.clone())
-                .or_insert(executable_path.clone());
-
-            let page_hint = browser_url
-                .as_deref()
-                .map(normalize_url)
-                .filter(|url| !url.is_empty())
-                .or_else(|| crate::monitor::infer_browser_page_hint(&window_title))
-                .or_else(|| {
-                    ocr_text
-                        .as_deref()
-                        .and_then(crate::monitor::infer_browser_page_hint_from_text)
-                });
-
-            let Some(page_hint) = page_hint else {
-                continue;
-            };
-
-            let domain = crate::monitor::browser_page_domain_label(&page_hint);
-            let domain_map = browser_map.entry(normalized_browser_name).or_default();
-            let page_map = domain_map.entry(domain).or_default();
-            *page_map.entry(page_hint.clone()).or_insert(0) += duration;
-            *url_duration_map.entry(page_hint).or_insert(0) += duration;
-        }
-
-        let browser_durations: Vec<(String, i64)> = browser_duration_map.into_iter().collect();
+        category_usage.sort_by(|a, b| {
+            b.duration
+                .cmp(&a.duration)
+                .then_with(|| a.category.cmp(&b.category))
+        });
 
         // 构建 BrowserUsage 列表
+        let browser_durations: Vec<(String, i64)> = browser_duration_map.into_iter().collect();
         let mut browser_usage: Vec<BrowserUsage> = browser_durations
             .iter()
             .map(|(browser_name, total_duration)| {
@@ -1088,7 +1077,9 @@ impl Database {
                 BrowserUsage {
                     browser_name: browser_name.clone(),
                     duration: *total_duration,
-                    executable_path: browser_path_map.get(browser_name).cloned().flatten(),
+                    executable_path: browser_path_map
+                        .get(browser_name)
+                        .and_then(|(path, _)| path.clone()),
                     domains,
                 }
             })
@@ -1750,7 +1741,7 @@ impl Database {
 
 #[cfg(test)]
 mod tests {
-    use super::{Activity, Database};
+    use super::{safe_local_timestamp, Activity, Database};
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -1760,6 +1751,12 @@ mod tests {
             .unwrap_or_default()
             .as_nanos();
         std::env::temp_dir().join(format!("work-review-{name}-{unique}.db"))
+    }
+
+    fn local_ts(date: &str, hour: u32, minute: u32) -> i64 {
+        let date = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").expect("解析日期失败");
+        let ndt = date.and_hms_opt(hour, minute, 0).expect("构造本地时间失败");
+        safe_local_timestamp(ndt)
     }
 
     #[test]
@@ -1902,6 +1899,99 @@ mod tests {
             0
         );
         assert_eq!(stats.app_usage.len(), 2);
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn 今日统计应仅累计落在当天窗口内的跨天时长() {
+        let db_path = temp_db_path("daily-stats-cross-day-start");
+        let db = Database::new(&db_path).expect("创建测试数据库失败");
+        let date = "2026-03-27";
+
+        let activity = Activity {
+            id: None,
+            timestamp: local_ts(date, 0, 10),
+            app_name: "Code".to_string(),
+            window_title: "night.ts".to_string(),
+            screenshot_path: "night.jpg".to_string(),
+            ocr_text: None,
+            category: "development".to_string(),
+            duration: 20 * 60,
+            browser_url: None,
+            executable_path: None,
+        };
+
+        db.insert_activity(&activity).expect("插入测试数据失败");
+
+        let stats = db
+            .get_daily_stats_with_work_time(date, 9, 18, 0, 0)
+            .expect("读取今日统计失败");
+
+        assert_eq!(stats.total_duration, 10 * 60);
+        assert_eq!(stats.app_usage[0].duration, 10 * 60);
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn 今日统计应纳入跨到次日的重叠时长() {
+        let db_path = temp_db_path("daily-stats-cross-day-end");
+        let db = Database::new(&db_path).expect("创建测试数据库失败");
+        let date = "2026-03-27";
+
+        let activity = Activity {
+            id: None,
+            timestamp: local_ts("2026-03-28", 0, 10),
+            app_name: "Code".to_string(),
+            window_title: "late.ts".to_string(),
+            screenshot_path: "late.jpg".to_string(),
+            ocr_text: None,
+            category: "development".to_string(),
+            duration: 20 * 60,
+            browser_url: None,
+            executable_path: None,
+        };
+
+        db.insert_activity(&activity).expect("插入测试数据失败");
+
+        let stats = db
+            .get_daily_stats_with_work_time(date, 9, 18, 0, 0)
+            .expect("读取今日统计失败");
+
+        assert_eq!(stats.total_duration, 10 * 60);
+        assert_eq!(stats.app_usage[0].duration, 10 * 60);
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn 办公时长应仅累计办公时间窗口内的交集() {
+        let db_path = temp_db_path("daily-stats-work-window");
+        let db = Database::new(&db_path).expect("创建测试数据库失败");
+        let date = "2026-03-27";
+
+        let activity = Activity {
+            id: None,
+            timestamp: local_ts(date, 9, 10),
+            app_name: "Code".to_string(),
+            window_title: "standup.md".to_string(),
+            screenshot_path: "standup.jpg".to_string(),
+            ocr_text: None,
+            category: "development".to_string(),
+            duration: 20 * 60,
+            browser_url: None,
+            executable_path: None,
+        };
+
+        db.insert_activity(&activity).expect("插入测试数据失败");
+
+        let stats = db
+            .get_daily_stats_with_work_time(date, 9, 18, 0, 0)
+            .expect("读取今日统计失败");
+
+        assert_eq!(stats.total_duration, 20 * 60);
+        assert_eq!(stats.work_time_duration, 10 * 60);
 
         let _ = std::fs::remove_file(db_path);
     }
