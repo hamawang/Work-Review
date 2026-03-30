@@ -82,8 +82,12 @@
           storage_limit_mb: 2048,
           jpeg_quality: 85,
           max_image_width: 1280,
+          screenshots_enabled: true,
           screenshot_display_mode: 'active_window',
         };
+      }
+      if (typeof config.storage.screenshots_enabled !== 'boolean') {
+        config.storage.screenshots_enabled = true;
       }
       if (!config.storage.screenshot_display_mode) {
         config.storage.screenshot_display_mode = 'active_window';

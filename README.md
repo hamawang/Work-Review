@@ -236,6 +236,8 @@ src-tauri/src/        Rust 后端（监控、数据库、分析、隐私、更�
 
 MIT
 
+---
+
 ## 历史星标
 
 <a href="https://www.star-history.com/#wm94i/Work_Review&Date">

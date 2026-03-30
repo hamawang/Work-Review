@@ -561,6 +561,22 @@ struct RecordingLoopDecision {
     reset_capture_clock: bool,
 }
 
+fn should_confirm_idle(
+    input_idle: bool,
+    screenshots_enabled: bool,
+    screenshot_confirmed: bool,
+) -> bool {
+    if !input_idle {
+        return false;
+    }
+
+    if screenshots_enabled {
+        screenshot_confirmed
+    } else {
+        true
+    }
+}
+
 fn recording_loop_decision(
     is_recording: bool,
     is_paused: bool,
@@ -1210,13 +1226,16 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                 }
             }
             PrivacyAction::Record => {
-                let classification = {
+                let (classification, screenshots_enabled) = {
                     let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
-                    crate::resolve_activity_classification(
-                        &state_guard.config,
-                        &active_window.app_name,
-                        &active_window.window_title,
-                        active_window.browser_url.as_deref(),
+                    (
+                        crate::resolve_activity_classification(
+                            &state_guard.config,
+                            &active_window.app_name,
+                            &active_window.window_title,
+                            active_window.browser_url.as_deref(),
+                        ),
+                        state_guard.config.storage.screenshots_enabled,
                     )
                 };
                 let category = classification.base_category.clone();
@@ -1349,17 +1368,20 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                     let previous_screenshot_path = latest.screenshot_path.clone();
 
                     // 截屏到内存，保存为临时文件供 OCR 使用
-                    let screenshot_result = {
+                    let screenshot_result = if screenshots_enabled {
                         let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
                         state_guard
                             .screenshot_service
                             .capture_for_window(Some(&active_window))
+                            .ok()
+                    } else {
+                        None
                     };
 
                     // ===== 空闲检测第二阶段：截图哈希确认 =====
                     // 只有键鼠超时时才检查屏幕变化，避免正常使用时的额外计算
-                    let is_confirmed_idle = if input_idle {
-                        if let Ok(ref screenshot) = screenshot_result {
+                    let screenshot_idle = if input_idle {
+                        if let Some(ref screenshot) = screenshot_result {
                             let hash = screenshot::ScreenshotService::calculate_image_hash(
                                 &screenshot.path,
                             )
@@ -1373,6 +1395,8 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                         idle_detector.reset();
                         false
                     };
+                    let is_confirmed_idle =
+                        should_confirm_idle(input_idle, screenshots_enabled, screenshot_idle);
 
                     // 如果确认空闲，跳过时长记录
                     let effective_duration = if is_confirmed_idle {
@@ -1385,7 +1409,7 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                     // 合并记录（不更新 screenshot_path，保留活动创建时的原始截图）
                     // 即使 effective_duration 为 0，也需要更新时间戳以保持记录活跃
                     let (merged_screenshot_path, previous_screenshot_full_path) =
-                        if let Ok(ref screenshot) = screenshot_result {
+                        if let Some(ref screenshot) = screenshot_result {
                             let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
                             (
                                 state_guard
@@ -1421,7 +1445,7 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                     }
 
                     // 对截图执行 OCR；若已成功合并，则保留最新截图并清理旧截图
-                    if let Ok(screenshot) = screenshot_result {
+                    if let Some(screenshot) = screenshot_result {
                         let latest_capture_path = screenshot.path.clone();
                         let state_clone = state.clone();
                         let data_dir_clone = {
@@ -1529,129 +1553,190 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                     })
                 } else {
                     // === 新建路径：正常截屏并保存 ===
-                    let screenshot_result = {
-                        let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
-                        state_guard
-                            .screenshot_service
-                            .capture_for_window(Some(&active_window))
-                    };
+                    if screenshots_enabled {
+                        let screenshot_result = {
+                            let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
+                            state_guard
+                                .screenshot_service
+                                .capture_for_window(Some(&active_window))
+                        };
 
-                    match screenshot_result {
-                        Ok(screenshot_result) => {
-                            // ===== 空闲检测第二阶段：截图哈希确认 =====
-                            let is_confirmed_idle = if input_idle {
-                                let hash = screenshot::ScreenshotService::calculate_image_hash(
-                                    &screenshot_result.path,
-                                )
-                                .unwrap_or(0);
-                                idle_detector.confirm_idle_with_hash(hash)
-                            } else {
-                                idle_detector.reset();
-                                false
-                            };
+                        match screenshot_result {
+                            Ok(screenshot_result) => {
+                                // ===== 空闲检测第二阶段：截图哈希确认 =====
+                                let screenshot_idle = if input_idle {
+                                    let hash = screenshot::ScreenshotService::calculate_image_hash(
+                                        &screenshot_result.path,
+                                    )
+                                    .unwrap_or(0);
+                                    idle_detector.confirm_idle_with_hash(hash)
+                                } else {
+                                    idle_detector.reset();
+                                    false
+                                };
+                                let is_confirmed_idle = should_confirm_idle(
+                                    input_idle,
+                                    screenshots_enabled,
+                                    screenshot_idle,
+                                );
 
-                            // 如果确认空闲，跳过时长记录（但仍创建活动记录以保持截图）
-                            let effective_duration = if is_confirmed_idle {
-                                log::debug!("空闲确认: 新活动时长设为 0");
-                                0
-                            } else {
-                                adjusted_duration
-                            };
+                                // 如果确认空闲，跳过时长记录（但仍创建活动记录以保持截图）
+                                let effective_duration = if is_confirmed_idle {
+                                    log::debug!("空闲确认: 新活动时长设为 0");
+                                    0
+                                } else {
+                                    adjusted_duration
+                                };
 
-                            let (relative_path, data_dir_clone) = {
-                                let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
-                                (
-                                    state_guard
-                                        .screenshot_service
-                                        .get_relative_path(&screenshot_result.path),
-                                    state_guard.data_dir.clone(),
-                                )
-                            };
+                                let (relative_path, data_dir_clone) = {
+                                    let state_guard =
+                                        state.lock().unwrap_or_else(|e| e.into_inner());
+                                    (
+                                        state_guard
+                                            .screenshot_service
+                                            .get_relative_path(&screenshot_result.path),
+                                        state_guard.data_dir.clone(),
+                                    )
+                                };
 
-                            let activity = database::Activity {
-                                id: None,
-                                timestamp: screenshot_result.timestamp,
-                                app_name: active_window.app_name.clone(),
-                                window_title: active_window.window_title,
-                                screenshot_path: relative_path.clone(),
-                                ocr_text: None,
-                                category,
-                                duration: effective_duration,
-                                browser_url: active_window.browser_url,
-                                executable_path: active_window.executable_path,
-                                semantic_category: Some(classification.semantic_category.clone()),
-                                semantic_confidence: Some(i32::from(classification.confidence)),
-                            };
+                                let activity = database::Activity {
+                                    id: None,
+                                    timestamp: screenshot_result.timestamp,
+                                    app_name: active_window.app_name.clone(),
+                                    window_title: active_window.window_title,
+                                    screenshot_path: relative_path.clone(),
+                                    ocr_text: None,
+                                    category,
+                                    duration: effective_duration,
+                                    browser_url: active_window.browser_url,
+                                    executable_path: active_window.executable_path,
+                                    semantic_category: Some(
+                                        classification.semantic_category.clone(),
+                                    ),
+                                    semantic_confidence: Some(i32::from(classification.confidence)),
+                                };
 
-                            let inserted = {
-                                let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
-                                state_guard.database.insert_activity(&activity)
-                            };
+                                let inserted = {
+                                    let state_guard =
+                                        state.lock().unwrap_or_else(|e| e.into_inner());
+                                    state_guard.database.insert_activity(&activity)
+                                };
 
-                            match inserted {
-                                Ok(activity_id) => {
-                                    log::info!(
-                                        "📝 新建活动: {} (id={})",
-                                        active_window.app_name,
-                                        activity_id
-                                    );
+                                match inserted {
+                                    Ok(activity_id) => {
+                                        log::info!(
+                                            "📝 新建活动: {} (id={})",
+                                            active_window.app_name,
+                                            activity_id
+                                        );
 
-                                    // 异步 OCR（新建活动的截图已保存，不删除）
-                                    let state_clone = state.clone();
-                                    let screenshot_path_clone = relative_path;
-                                    let ocr_sem = ocr_semaphore.clone();
-                                    tokio::spawn(async move {
-                                        // 非阻塞获取 permit，满载时跳过 OCR
-                                        let _permit = match ocr_sem.try_acquire_owned() {
-                                            Ok(p) => p,
-                                            Err(_) => {
-                                                log::debug!("OCR 并发已满，跳过新建路径 OCR");
-                                                return;
-                                            }
-                                        };
+                                        // 异步 OCR（新建活动的截图已保存，不删除）
+                                        let state_clone = state.clone();
+                                        let screenshot_path_clone = relative_path;
+                                        let ocr_sem = ocr_semaphore.clone();
+                                        tokio::spawn(async move {
+                                            // 非阻塞获取 permit，满载时跳过 OCR
+                                            let _permit = match ocr_sem.try_acquire_owned() {
+                                                Ok(p) => p,
+                                                Err(_) => {
+                                                    log::debug!("OCR 并发已满，跳过新建路径 OCR");
+                                                    return;
+                                                }
+                                            };
 
-                                        tokio::time::sleep(tokio::time::Duration::from_secs(1))
-                                            .await;
+                                            tokio::time::sleep(tokio::time::Duration::from_secs(1))
+                                                .await;
 
-                                        let full_path = data_dir_clone.join(&screenshot_path_clone);
-                                        let ocr_service = ocr::OcrService::new(&data_dir_clone);
+                                            let full_path =
+                                                data_dir_clone.join(&screenshot_path_clone);
+                                            let ocr_service = ocr::OcrService::new(&data_dir_clone);
 
-                                        if let Ok(Some(ocr_result)) =
-                                            ocr_service.extract_text(&full_path)
-                                        {
-                                            if !ocr_result.text.is_empty() {
-                                                let filtered_text =
-                                                    ocr::filter_sensitive_text(&ocr_result.text);
-                                                if let Ok(state_guard) = state_clone.lock() {
-                                                    let _ =
-                                                        state_guard.database.update_activity_ocr(
-                                                            activity_id,
-                                                            Some(filtered_text),
-                                                        );
-                                                    log::info!(
+                                            if let Ok(Some(ocr_result)) =
+                                                ocr_service.extract_text(&full_path)
+                                            {
+                                                if !ocr_result.text.is_empty() {
+                                                    let filtered_text = ocr::filter_sensitive_text(
+                                                        &ocr_result.text,
+                                                    );
+                                                    if let Ok(state_guard) = state_clone.lock() {
+                                                        let _ = state_guard
+                                                            .database
+                                                            .update_activity_ocr(
+                                                                activity_id,
+                                                                Some(filtered_text),
+                                                            );
+                                                        log::info!(
                                                         "OCR 完成(新建): 活动 {} 识别到 {} 个字符",
                                                         activity_id,
                                                         ocr_result.text.len()
                                                     );
+                                                    }
                                                 }
                                             }
-                                        }
-                                    });
+                                        });
 
-                                    Some(database::Activity {
-                                        id: Some(activity_id),
-                                        ..activity
-                                    })
-                                }
-                                Err(e) => {
-                                    log::error!("保存活动记录失败: {e}");
-                                    None
+                                        Some(database::Activity {
+                                            id: Some(activity_id),
+                                            ..activity
+                                        })
+                                    }
+                                    Err(e) => {
+                                        log::error!("保存活动记录失败: {e}");
+                                        None
+                                    }
                                 }
                             }
+                            Err(e) => {
+                                log::error!("截屏失败: {e}");
+                                None
+                            }
                         }
-                        Err(e) => {
-                            log::error!("截屏失败: {e}");
-                            None
+                    } else {
+                        let is_confirmed_idle =
+                            should_confirm_idle(input_idle, screenshots_enabled, false);
+                        let effective_duration = if is_confirmed_idle {
+                            log::debug!("关闭截图后按输入空闲判定，新活动时长设为 0");
+                            0
+                        } else {
+                            adjusted_duration
+                        };
+
+                        let activity = database::Activity {
+                            id: None,
+                            timestamp: current_timestamp,
+                            app_name: active_window.app_name.clone(),
+                            window_title: active_window.window_title,
+                            screenshot_path: String::new(),
+                            ocr_text: None,
+                            category,
+                            duration: effective_duration,
+                            browser_url: active_window.browser_url,
+                            executable_path: active_window.executable_path,
+                            semantic_category: Some(classification.semantic_category.clone()),
+                            semantic_confidence: Some(i32::from(classification.confidence)),
+                        };
+
+                        let inserted = {
+                            let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
+                            state_guard.database.insert_activity(&activity)
+                        };
+
+                        match inserted {
+                            Ok(activity_id) => {
+                                log::info!(
+                                    "📝 新建无截图活动: {} (id={})",
+                                    active_window.app_name,
+                                    activity_id
+                                );
+                                Some(database::Activity {
+                                    id: Some(activity_id),
+                                    ..activity
+                                })
+                            }
+                            Err(e) => {
+                                log::error!("保存无截图活动记录失败: {e}");
+                                None
+                            }
                         }
                     }
                 }
@@ -2358,8 +2443,8 @@ mod tests {
         effective_dock_visibility, main_window_close_behavior, monitoring_poll_interval_ms,
         monitoring_poll_interval_ms_for_platform, recording_loop_decision,
         resolve_activity_classification, screen_lock_check_interval_ms_for_platform,
-        should_prevent_exit, tray_recording_toggle_action, tray_recording_toggle_label,
-        MainWindowCloseBehavior, RecordingToggleAction,
+        should_confirm_idle, should_prevent_exit, tray_recording_toggle_action,
+        tray_recording_toggle_label, MainWindowCloseBehavior, RecordingToggleAction,
     };
     use crate::avatar_engine::{apply_avatar_opacity, default_avatar_state, derive_avatar_state};
     use crate::config::{AppConfig, WebsiteSemanticRule};
@@ -2386,6 +2471,18 @@ mod tests {
         assert!(decision.should_continue);
         assert!(!decision.reset_capture_clock);
         assert_eq!(decision.screenshot_interval, 30);
+    }
+
+    #[test]
+    fn 关闭截图后应直接按输入空闲判断为空闲() {
+        assert!(should_confirm_idle(true, false, false));
+        assert!(!should_confirm_idle(false, false, true));
+    }
+
+    #[test]
+    fn 开启截图后仍应依赖截图确认空闲() {
+        assert!(!should_confirm_idle(true, true, false));
+        assert!(should_confirm_idle(true, true, true));
     }
 
     #[test]

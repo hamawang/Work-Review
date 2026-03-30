@@ -205,3 +205,24 @@ src-tauri/src/        Rust backend (monitoring, database, analysis, privacy, upd
 ## License
 
 MIT
+
+---
+
+## Star History
+
+<a href="https://www.star-history.com/#wm94i/Work_Review&Date">
+  <picture>
+    <source
+      media="(prefers-color-scheme: dark)"
+      srcset="https://api.star-history.com/svg?repos=wm94i/Work_Review&type=Date&theme=dark"
+    />
+    <source
+      media="(prefers-color-scheme: light)"
+      srcset="https://api.star-history.com/svg?repos=wm94i/Work_Review&type=Date"
+    />
+    <img
+      alt="Star History Chart"
+      src="https://api.star-history.com/svg?repos=wm94i/Work_Review&type=Date"
+    />
+  </picture>
+</a>

@@ -18,3 +18,14 @@ test('README 应提供中英文切换入口并包含英文文档', async () => {
 
   await access(new URL('./README.en.md', import.meta.url));
 });
+
+test('中英文 README 底部都应展示 Star History，并在 License 后加入分隔线', async () => {
+  const [zhSource, enSource] = await Promise.all([
+    readFile(new URL('./README.md', import.meta.url), 'utf8'),
+    readFile(new URL('./README.en.md', import.meta.url), 'utf8'),
+  ]);
+
+  assert.match(zhSource, /## License\s+MIT\s+---\s+## 历史星标/s);
+  assert.match(enSource, /## License\s+MIT\s+---\s+## Star History/s);
+  assert.match(enSource, /star-history\.com\/#wm94i\/Work_Review&Date/);
+});

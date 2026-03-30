@@ -152,6 +152,9 @@
 
   // 加载缩略图（列表用，400px），使用 LRU 缓存控制内存
   async function loadThumbnail(screenshotPath) {
+    if (!screenshotPath) {
+      return null;
+    }
     if (thumbnailCache[screenshotPath]) {
       return thumbnailCache[screenshotPath];
     }
@@ -168,6 +171,9 @@
 
   // 加载高分辨率图片（详情用，1200px），使用 LRU 缓存控制内存
   async function loadFullImage(screenshotPath) {
+    if (!screenshotPath) {
+      return null;
+    }
     if (fullImageCache[screenshotPath]) {
       return fullImageCache[screenshotPath];
     }
@@ -655,9 +661,13 @@
             {:else if selectedActivity.thumbnail}
               <!-- max-h 限制高度防止超高图片撑开弹窗，object-contain 保持比例居中 -->
               <img src={selectedActivity.thumbnail} alt="屏幕截图" class="max-w-full max-h-96 object-contain" />
-            {:else}
+            {:else if selectedActivity.screenshot_path}
               <div class="py-12 flex items-center justify-center text-slate-400">
                 <span>截图加载失败</span>
+              </div>
+            {:else}
+              <div class="py-12 flex items-center justify-center text-slate-400">
+                <span>本次记录未保存截图</span>
               </div>
             {/if}
           </div>

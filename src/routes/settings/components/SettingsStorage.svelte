@@ -192,6 +192,30 @@
   <p class="settings-card-desc">控制截图频率、保留周期和多屏记录方式</p>
   
   <div class="settings-section">
+    <div class="settings-block">
+      <div class="flex items-center justify-between gap-4">
+        <div>
+          <p class="settings-text">启用截图</p>
+          <p class="settings-note">关闭后仍保留时间线、应用和网站记录，但不再保存截图和 OCR 文本</p>
+        </div>
+        <button
+          type="button"
+          on:click={() => {
+            config.storage.screenshots_enabled = !config.storage.screenshots_enabled;
+            handleChange();
+          }}
+          class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-150
+            {config.storage.screenshots_enabled ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}"
+          aria-pressed={config.storage.screenshots_enabled}
+        >
+          <span
+            class="inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform duration-150
+              {config.storage.screenshots_enabled ? 'translate-x-5' : 'translate-x-0.5'}"
+          ></span>
+        </button>
+      </div>
+    </div>
+
     <!-- 轮询间隔 -->
     <div class="settings-block">
       <div class="flex items-center justify-between">
@@ -212,7 +236,7 @@
         <span>10秒（更精确）</span>
         <span>120秒（更省电）</span>
       </div>
-      <p class="settings-note">每隔此时长检测一次当前活动窗口并执行 OCR</p>
+      <p class="settings-note">每隔此时长检测一次当前活动窗口；启用截图时会同时保存截图并执行 OCR</p>
     </div>
 
     <!-- 数据保留 -->

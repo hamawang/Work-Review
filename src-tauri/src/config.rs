@@ -352,9 +352,16 @@ pub struct StorageConfig {
     pub jpeg_quality: u8,
     /// 最大图片宽度（超过会缩放）
     pub max_image_width: u32,
+    /// 是否启用截图与 OCR
+    #[serde(default = "default_screenshots_enabled")]
+    pub screenshots_enabled: bool,
     /// 截图屏幕范围
     #[serde(default)]
     pub screenshot_display_mode: ScreenshotDisplayMode,
+}
+
+fn default_screenshots_enabled() -> bool {
+    true
 }
 
 impl Default for StorageConfig {
@@ -365,6 +372,7 @@ impl Default for StorageConfig {
             storage_limit_mb: 2048,       // 默认2GB上限
             jpeg_quality: 85,             // 85%质量，更清晰
             max_image_width: 1280,        // 最大宽度1280px
+            screenshots_enabled: true,
             screenshot_display_mode: ScreenshotDisplayMode::ActiveWindow,
         }
     }
@@ -824,6 +832,13 @@ mod tests {
             config.storage.screenshot_display_mode,
             ScreenshotDisplayMode::ActiveWindow
         );
+    }
+
+    #[test]
+    fn 截图开关默认应开启() {
+        let config = AppConfig::default();
+
+        assert!(config.storage.screenshots_enabled);
     }
 
     #[test]
