@@ -1,5 +1,6 @@
 <script>
   export let bubble = null;
+  export let onClose = () => {};
 
   $: bubbleMessage = bubble?.message ? bubble.message.replace(/\s+/g, '').trim() : '';
   $: toneClasses =
@@ -9,16 +10,29 @@
 </script>
 
 {#if bubble}
-  <div class="pointer-events-none absolute inset-0 z-20 overflow-visible">
+  <div class="absolute inset-0 z-20 overflow-visible {bubble?.persistent ? 'pointer-events-auto' : 'pointer-events-none'}">
     <div class="absolute" style="right: 18%; top: 4%;">
       <div class="relative overflow-visible">
       <div
         class="relative rounded-[22px] border backdrop-blur-xl shadow-[0_10px_18px_rgba(15,23,42,0.18),0_24px_44px_rgba(15,23,42,0.26)] {toneClasses}"
         style="width: fit-content; max-width: min(58vw, 188px); min-width: 0; padding: 10px 12px;"
+        role={bubble?.persistent ? 'button' : undefined}
+        tabindex={bubble?.persistent ? 0 : undefined}
+        on:click={onClose}
       >
         <div class="pointer-events-none absolute inset-[1px] rounded-[21px] border border-white/10"></div>
+        {#if bubble?.persistent}
+          <button
+            type="button"
+            class="absolute right-2 top-2 inline-flex h-5 w-5 items-center justify-center rounded-full text-slate-300 transition hover:bg-white/10 hover:text-white"
+            aria-label="关闭提醒"
+            on:click|stopPropagation={onClose}
+          >
+            ×
+          </button>
+        {/if}
         <div
-          class="relative text-sm font-semibold leading-[1.35] tracking-[0.01em]"
+          class="relative text-sm font-semibold leading-[1.35] tracking-[0.01em] pr-6"
           style="display: inline-block; word-break: break-word;"
         >
           {bubbleMessage}

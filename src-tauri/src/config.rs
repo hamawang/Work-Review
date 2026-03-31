@@ -420,6 +420,9 @@ pub struct AppConfig {
     pub daily_report_export_dir: Option<String>,
     /// 是否开机自启
     pub auto_start: bool,
+    /// 开机自启动时是否静默驻留而不显示主界面
+    #[serde(default)]
+    pub auto_start_silent: bool,
     /// 主题模式: system, light, dark
     pub theme: String,
     /// 上班开始时间（0-23）
@@ -452,6 +455,12 @@ pub struct AppConfig {
     /// 轻量模式：关闭主界面时释放主 Webview，仅保留后台录制与托盘
     #[serde(default)]
     pub lightweight_mode: bool,
+    /// 是否启用休息提醒
+    #[serde(default)]
+    pub break_reminder_enabled: bool,
+    /// 连续活跃多久后提醒（分钟）
+    #[serde(default = "default_break_reminder_interval_minutes")]
+    pub break_reminder_interval_minutes: u64,
     /// 是否启用桌面化身窗口
     #[serde(default)]
     pub avatar_enabled: bool,
@@ -493,6 +502,9 @@ fn default_bg_opacity() -> f32 {
 fn default_bg_blur() -> u8 {
     1
 }
+fn default_break_reminder_interval_minutes() -> u64 {
+    50
+}
 fn default_avatar_scale() -> f64 {
     0.9
 }
@@ -515,6 +527,7 @@ impl Default for AppConfig {
             daily_report_custom_prompt: String::new(),
             daily_report_export_dir: None,
             auto_start: false,
+            auto_start_silent: false,
             theme: "system".to_string(),
             work_start_hour: 9,
             work_end_hour: 18,
@@ -528,6 +541,8 @@ impl Default for AppConfig {
             openai_model: "gpt-4o-mini".to_string(),
             hide_dock_icon: false,
             lightweight_mode: false,
+            break_reminder_enabled: false,
+            break_reminder_interval_minutes: default_break_reminder_interval_minutes(),
             avatar_enabled: false,
             avatar_scale: default_avatar_scale(),
             avatar_opacity: default_avatar_opacity(),
@@ -549,6 +564,8 @@ impl AppConfig {
         normalize_website_semantic_rules(&mut self.website_semantic_rules);
         self.avatar_scale = normalize_avatar_scale(self.avatar_scale);
         self.avatar_opacity = normalize_avatar_opacity(self.avatar_opacity);
+        self.break_reminder_interval_minutes =
+            normalize_break_reminder_interval_minutes(self.break_reminder_interval_minutes);
         self.daily_report_custom_prompt = self.daily_report_custom_prompt.trim().to_string();
         self.daily_report_export_dir =
             normalize_optional_string(self.daily_report_export_dir.take());
@@ -772,6 +789,13 @@ fn normalize_avatar_opacity(value: f64) -> f64 {
     value.clamp(0.45, 1.0)
 }
 
+fn normalize_break_reminder_interval_minutes(value: u64) -> u64 {
+    match value {
+        30 | 45 | 50 | 60 | 90 | 120 => value,
+        _ => default_break_reminder_interval_minutes(),
+    }
+}
+
 fn normalize_optional_string(value: Option<String>) -> Option<String> {
     value.and_then(|raw| {
         let trimmed = raw.trim();
@@ -845,6 +869,21 @@ mod tests {
         let config = AppConfig::default();
 
         assert!(config.storage.screenshots_enabled);
+    }
+
+    #[test]
+    fn 休息提醒默认应关闭且间隔为五十分钟() {
+        let config = AppConfig::default();
+
+        assert!(!config.break_reminder_enabled);
+        assert_eq!(config.break_reminder_interval_minutes, 50);
+    }
+
+    #[test]
+    fn 开机自启动默认应显示主界面() {
+        let config = AppConfig::default();
+
+        assert!(!config.auto_start_silent);
     }
 
     #[test]

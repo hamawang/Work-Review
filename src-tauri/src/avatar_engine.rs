@@ -43,6 +43,12 @@ pub struct AvatarStatePayload {
 pub struct AvatarBubblePayload {
     pub message: String,
     pub tone: String,
+    #[serde(default)]
+    pub persistent: bool,
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
+    #[serde(default)]
+    pub clear: bool,
 }
 
 impl AvatarBubblePayload {
@@ -50,6 +56,9 @@ impl AvatarBubblePayload {
         Self {
             message: message.into(),
             tone: "info".to_string(),
+            persistent: false,
+            duration_ms: Some(4200),
+            clear: false,
         }
     }
 
@@ -57,6 +66,29 @@ impl AvatarBubblePayload {
         Self {
             message: message.into(),
             tone: "success".to_string(),
+            persistent: false,
+            duration_ms: Some(4200),
+            clear: false,
+        }
+    }
+
+    pub fn persistent_info(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            tone: "info".to_string(),
+            persistent: true,
+            duration_ms: None,
+            clear: false,
+        }
+    }
+
+    pub fn clear() -> Self {
+        Self {
+            message: String::new(),
+            tone: "info".to_string(),
+            persistent: false,
+            duration_ms: None,
+            clear: true,
         }
     }
 }

@@ -41,6 +41,7 @@ use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, Position};
 // 全局 AppHandle，用于在 macOS Dock 点击时恢复窗口
 static APP_HANDLE: OnceCell<AppHandle> = OnceCell::new();
 const MAIN_WINDOW_LABEL: &str = "main";
+const AUTOSTART_LAUNCH_ARG: &str = "--autostart";
 const TRAY_MENU_SHOW_ID: &str = "show";
 const TRAY_MENU_RECORDING_TOGGLE_ID: &str = "recording-toggle";
 const TRAY_MENU_LIGHTWEIGHT_MODE_ID: &str = "lightweight-mode";
@@ -359,6 +360,127 @@ struct DataDirPreference {
 
 fn should_prevent_exit(suppress_next_exit: bool, explicit_quit_requested: bool) -> bool {
     suppress_next_exit && !explicit_quit_requested
+}
+
+fn launch_args_contain_autostart(args: &[String]) -> bool {
+    args.iter().any(|arg| arg == AUTOSTART_LAUNCH_ARG)
+}
+
+fn should_hide_main_window_on_setup(config: &AppConfig, launch_args: &[String]) -> bool {
+    config.auto_start && config.auto_start_silent && launch_args_contain_autostart(launch_args)
+}
+
+const BREAK_REMINDER_BUFFER_MINUTES: u64 = 5;
+const BREAK_REMINDER_MESSAGE: &str = "该休息一下了，起来活动活动吧。";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BreakReminderPhase {
+    Counting,
+    Cooldown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BreakReminderRuntime {
+    phase: BreakReminderPhase,
+    elapsed_ms: u64,
+    bubble_visible: bool,
+}
+
+impl BreakReminderRuntime {
+    fn new() -> Self {
+        Self {
+            phase: BreakReminderPhase::Counting,
+            elapsed_ms: 0,
+            bubble_visible: false,
+        }
+    }
+
+    fn reset(&mut self) {
+        self.phase = BreakReminderPhase::Counting;
+        self.elapsed_ms = 0;
+        self.bubble_visible = false;
+    }
+
+    fn reset_active_cycle(&mut self) {
+        if self.phase == BreakReminderPhase::Counting {
+            self.elapsed_ms = 0;
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BreakReminderSignal {
+    TickMillis(u64),
+    TickMinutes(u64),
+    Dismiss,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+struct BreakReminderAdvanceResult {
+    should_emit: bool,
+    should_clear: bool,
+    payload: Option<avatar_engine::AvatarBubblePayload>,
+}
+
+fn advance_break_reminder(
+    state: &mut BreakReminderRuntime,
+    enabled: bool,
+    interval_minutes: u64,
+    signal: BreakReminderSignal,
+) -> BreakReminderAdvanceResult {
+    let mut result = BreakReminderAdvanceResult::default();
+
+    if !enabled {
+        if state.bubble_visible {
+            result.should_clear = true;
+            result.payload = Some(avatar_engine::AvatarBubblePayload::clear());
+        }
+        state.reset();
+        return result;
+    }
+
+    match signal {
+        BreakReminderSignal::Dismiss => {
+            if state.bubble_visible {
+                state.bubble_visible = false;
+                result.should_clear = true;
+                result.payload = Some(avatar_engine::AvatarBubblePayload::clear());
+            }
+            return result;
+        }
+        BreakReminderSignal::TickMillis(0) | BreakReminderSignal::TickMinutes(0) => return result,
+        _ => {}
+    }
+
+    let delta_ms = match signal {
+        BreakReminderSignal::TickMillis(value) => value,
+        BreakReminderSignal::TickMinutes(value) => value.saturating_mul(60_000),
+        BreakReminderSignal::Dismiss => 0,
+    };
+
+    match state.phase {
+        BreakReminderPhase::Counting => {
+            state.elapsed_ms = state.elapsed_ms.saturating_add(delta_ms);
+            if state.elapsed_ms >= interval_minutes.saturating_mul(60_000) {
+                state.phase = BreakReminderPhase::Cooldown;
+                state.elapsed_ms = 0;
+                state.bubble_visible = true;
+                result.should_emit = true;
+                result.payload = Some(avatar_engine::AvatarBubblePayload::persistent_info(
+                    BREAK_REMINDER_MESSAGE,
+                ));
+            }
+        }
+        BreakReminderPhase::Cooldown => {
+            state.elapsed_ms = state.elapsed_ms.saturating_add(delta_ms);
+            if state.elapsed_ms >= BREAK_REMINDER_BUFFER_MINUTES.saturating_mul(60_000) {
+                state.phase = BreakReminderPhase::Counting;
+                state.elapsed_ms = 0;
+            }
+        }
+    }
+
+    result
 }
 
 pub(crate) fn default_data_dir() -> PathBuf {
@@ -794,11 +916,20 @@ async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
     let mut pending_avatar_state: Option<avatar_engine::AvatarStatePayload> = None;
     let mut pending_avatar_hits: u8 = 0;
     let mut last_window_signature: Option<String> = None;
+    let mut break_reminder_runtime = BreakReminderRuntime::new();
     const IDLE_TIMEOUT_MINUTES: u64 = 3;
     let idle_detector = idle_detector::IdleDetector::new(IDLE_TIMEOUT_MINUTES);
 
     loop {
-        let (avatar_enabled, avatar_generating_report, avatar_opacity, is_recording, is_paused) = {
+        let (
+            avatar_enabled,
+            avatar_generating_report,
+            avatar_opacity,
+            is_recording,
+            is_paused,
+            break_reminder_enabled,
+            break_reminder_interval_minutes,
+        ) = {
             let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
             (
                 state_guard.config.avatar_enabled,
@@ -806,20 +937,30 @@ async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
                 state_guard.config.avatar_opacity,
                 state_guard.is_recording,
                 state_guard.is_paused,
+                state_guard.config.break_reminder_enabled,
+                state_guard.config.break_reminder_interval_minutes,
             )
         };
 
         let activity_decision =
             avatar_activity_decision(avatar_enabled, is_recording, is_paused, avatar_opacity);
-        tokio::time::sleep(Duration::from_millis(
-            avatar_monitor_poll_interval_ms_for_platform(
-                cfg!(target_os = "macos"),
-                activity_decision.should_continue,
-            ),
-        ))
-        .await;
+        let poll_interval_ms = avatar_monitor_poll_interval_ms_for_platform(
+            cfg!(target_os = "macos"),
+            activity_decision.should_continue,
+        );
+        tokio::time::sleep(Duration::from_millis(poll_interval_ms)).await;
 
         if !activity_decision.should_continue {
+            let reminder_result = advance_break_reminder(
+                &mut break_reminder_runtime,
+                false,
+                break_reminder_interval_minutes,
+                BreakReminderSignal::TickMillis(0),
+            );
+            if let Some(payload) = reminder_result.payload.as_ref() {
+                avatar_engine::emit_avatar_bubble(&app, payload);
+            }
+
             pending_avatar_state = None;
             pending_avatar_hits = 0;
             last_window_signature = None;
@@ -859,6 +1000,35 @@ async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
         }
 
         let input_idle = idle_detector.is_input_idle();
+        let reminder_result = if !(avatar_enabled && break_reminder_enabled) {
+            advance_break_reminder(
+                &mut break_reminder_runtime,
+                false,
+                break_reminder_interval_minutes,
+                BreakReminderSignal::TickMillis(0),
+            )
+        } else if break_reminder_runtime.phase == BreakReminderPhase::Cooldown {
+            advance_break_reminder(
+                &mut break_reminder_runtime,
+                true,
+                break_reminder_interval_minutes,
+                BreakReminderSignal::TickMillis(poll_interval_ms),
+            )
+        } else if input_idle {
+            break_reminder_runtime.reset_active_cycle();
+            BreakReminderAdvanceResult::default()
+        } else {
+            advance_break_reminder(
+                &mut break_reminder_runtime,
+                true,
+                break_reminder_interval_minutes,
+                BreakReminderSignal::TickMillis(poll_interval_ms),
+            )
+        };
+        if let Some(payload) = reminder_result.payload.as_ref() {
+            avatar_engine::emit_avatar_bubble(&app, payload);
+        }
+
         let avatar_state = avatar_engine::apply_avatar_opacity(
             avatar_engine::derive_avatar_state_with_rules(
                 &app_category_rules,
@@ -2156,7 +2326,7 @@ async fn main() {
         // 开机自启动插件（macOS 使用 LaunchAgent，Windows 使用注册表）
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            None,
+            Some(vec![AUTOSTART_LAUNCH_ARG]),
         ))
         .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
             // 当用户尝试打开第二个实例时，将焦点给到现有窗口
@@ -2198,6 +2368,7 @@ async fn main() {
         .setup(|app| {
             let window = app.get_webview_window("main").unwrap();
             configure_main_window(&window);
+            let launch_args = std::env::args().collect::<Vec<_>>();
 
             // 获取 Arc<Mutex<AppState>> 并克隆以便在异步任务中使用
             let state = app.state::<Arc<Mutex<AppState>>>();
@@ -2394,6 +2565,15 @@ async fn main() {
                 // decorations 配置由 tauri.conf.json 控制，用户可通过设置中的开关动态修改
             }
 
+            let should_hide_main_window = {
+                let state_guard = state.inner().lock().unwrap_or_else(|e| e.into_inner());
+                should_hide_main_window_on_setup(&state_guard.config, &launch_args)
+            };
+
+            if should_hide_main_window {
+                let _ = window.hide();
+            }
+
             sync_effective_dock_visibility(&app.handle());
 
             // 保存 AppHandle 到全局变量，用于从 macOS Dock 点击恢复窗口
@@ -2514,15 +2694,16 @@ async fn main() {
 #[cfg(test)]
 mod tests {
     use super::{
-        avatar_activity_decision, avatar_monitor_poll_interval_ms,
+        advance_break_reminder, avatar_activity_decision, avatar_monitor_poll_interval_ms,
         avatar_monitor_poll_interval_ms_for_platform, avatar_transition_decision,
         browser_change_capture_min_interval_ms, effective_dock_visibility,
-        main_window_close_behavior, monitoring_poll_interval_ms,
+        launch_args_contain_autostart, main_window_close_behavior, monitoring_poll_interval_ms,
         monitoring_poll_interval_ms_for_platform, recording_loop_decision,
         resolve_activity_classification, screen_lock_check_interval_ms_for_platform,
-        should_confirm_idle, should_prevent_exit, should_probe_browser_url_before_change_detection,
-        tray_recording_toggle_action, tray_recording_toggle_label, MainWindowCloseBehavior,
-        RecordingToggleAction,
+        should_confirm_idle, should_hide_main_window_on_setup, should_prevent_exit,
+        should_probe_browser_url_before_change_detection, tray_recording_toggle_action,
+        tray_recording_toggle_label, BreakReminderRuntime, BreakReminderSignal,
+        MainWindowCloseBehavior, RecordingToggleAction,
     };
     use crate::avatar_engine::{apply_avatar_opacity, default_avatar_state, derive_avatar_state};
     use crate::config::{AppConfig, WebsiteSemanticRule};
@@ -2778,5 +2959,92 @@ mod tests {
         assert!(should_prevent_exit(true, false));
         assert!(!should_prevent_exit(false, false));
         assert!(!should_prevent_exit(true, true));
+    }
+
+    #[test]
+    fn 仅带_autostart_参数且配置开启静默时才应隐藏主窗口() {
+        let mut config = AppConfig::default();
+        config.auto_start = true;
+        config.auto_start_silent = true;
+
+        assert!(should_hide_main_window_on_setup(
+            &config,
+            &["work-review".to_string(), "--autostart".to_string()]
+        ));
+        assert!(!should_hide_main_window_on_setup(
+            &config,
+            &["work-review".to_string()]
+        ));
+    }
+
+    #[test]
+    fn 自启动参数判定应精确匹配_autostart() {
+        assert!(launch_args_contain_autostart(&[
+            "work-review".to_string(),
+            "--autostart".to_string()
+        ]));
+        assert!(!launch_args_contain_autostart(&[
+            "work-review".to_string(),
+            "--autostarted".to_string()
+        ]));
+    }
+
+    #[test]
+    fn 休息提醒首次达到阈值时应触发一次() {
+        let mut state = BreakReminderRuntime::new();
+
+        let first =
+            advance_break_reminder(&mut state, true, 50, BreakReminderSignal::TickMinutes(49));
+        let second =
+            advance_break_reminder(&mut state, true, 50, BreakReminderSignal::TickMinutes(1));
+
+        assert!(!first.should_emit);
+        assert!(second.should_emit);
+        assert!(second
+            .payload
+            .as_ref()
+            .is_some_and(|payload| payload.persistent));
+    }
+
+    #[test]
+    fn 休息提醒应在五分钟缓冲后重新开始下一轮计时() {
+        let mut state = BreakReminderRuntime::new();
+
+        let first =
+            advance_break_reminder(&mut state, true, 50, BreakReminderSignal::TickMinutes(50));
+        let cooldown =
+            advance_break_reminder(&mut state, true, 50, BreakReminderSignal::TickMinutes(5));
+        let next_round =
+            advance_break_reminder(&mut state, true, 50, BreakReminderSignal::TickMinutes(50));
+
+        assert!(first.should_emit);
+        assert!(!cooldown.should_emit);
+        assert!(next_round.should_emit);
+    }
+
+    #[test]
+    fn 手动关闭提醒不应打断下一轮计时() {
+        let mut state = BreakReminderRuntime::new();
+
+        let _ = advance_break_reminder(&mut state, true, 50, BreakReminderSignal::TickMinutes(50));
+        let dismiss = advance_break_reminder(&mut state, true, 50, BreakReminderSignal::Dismiss);
+        let _ = advance_break_reminder(&mut state, true, 50, BreakReminderSignal::TickMinutes(5));
+        let next_round =
+            advance_break_reminder(&mut state, true, 50, BreakReminderSignal::TickMinutes(50));
+
+        assert!(dismiss.should_clear);
+        assert!(next_round.should_emit);
+    }
+
+    #[test]
+    fn 关闭休息提醒时应立即清除当前气泡并停止计时() {
+        let mut state = BreakReminderRuntime::new();
+        let _ = advance_break_reminder(&mut state, true, 50, BreakReminderSignal::TickMinutes(50));
+
+        let disabled =
+            advance_break_reminder(&mut state, false, 50, BreakReminderSignal::TickMinutes(1));
+
+        assert!(disabled.should_clear);
+        assert!(!disabled.should_emit);
     }
 }

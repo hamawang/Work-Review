@@ -45,6 +45,23 @@ test('保存失败时应回滚桌宠开关状态', async () => {
   assert.equal(config.avatar_enabled, true);
 });
 
+test('关闭桌宠时应同时关闭休息提醒，避免保留无效依赖配置', async () => {
+  const config = { avatar_enabled: true, break_reminder_enabled: true };
+  let savedConfig = null;
+
+  const enabled = await toggleAvatarSetting(config, async (nextConfig) => {
+    savedConfig = { ...nextConfig };
+  });
+
+  assert.equal(enabled, false);
+  assert.equal(config.avatar_enabled, false);
+  assert.equal(config.break_reminder_enabled, false);
+  assert.deepEqual(savedConfig, {
+    avatar_enabled: false,
+    break_reminder_enabled: false,
+  });
+});
+
 test('桌宠开关提示文案应与状态匹配', () => {
   assert.equal(
     getAvatarToggleToast(true),

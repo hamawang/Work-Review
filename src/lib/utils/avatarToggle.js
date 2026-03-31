@@ -28,15 +28,20 @@ export function getAvatarToggleUiState(enabled, saving = false) {
 
 export async function toggleAvatarSetting(config, saveConfig) {
   const previousEnabled = Boolean(config.avatar_enabled);
+  const previousBreakReminderEnabled = Boolean(config.break_reminder_enabled);
   const nextEnabled = !previousEnabled;
 
   config.avatar_enabled = nextEnabled;
+  if (!nextEnabled) {
+    config.break_reminder_enabled = false;
+  }
 
   try {
     await saveConfig(config);
     return nextEnabled;
   } catch (error) {
     config.avatar_enabled = previousEnabled;
+    config.break_reminder_enabled = previousBreakReminderEnabled;
     throw error;
   }
 }

@@ -97,6 +97,12 @@
     config.lightweight_mode = !config.lightweight_mode;
     dispatch('change', config);
   }
+
+  function updateAutoStartLaunchMode(silentMode) {
+    config.auto_start_silent = silentMode;
+    dispatch('change', config);
+  }
+
 </script>
 
 <!-- 基本设置 -->
@@ -161,6 +167,28 @@
         <span class="switch-thumb {autoStartEnabled ? 'translate-x-5' : 'translate-x-0'}"></span>
       </button>
     </div>
+
+    {#if autoStartEnabled}
+      <div class="settings-block pt-3 border-t border-slate-200 dark:border-slate-700">
+        <div class="settings-text">{t('settingsGeneral.autoStartLaunchMode')}</div>
+        <div class="mt-2 flex gap-2">
+          <button
+            type="button"
+            on:click={() => updateAutoStartLaunchMode(false)}
+            class="segment-btn {config.auto_start_silent ? 'settings-segment-base' : 'settings-segment-active'}"
+          >
+            {t('settingsGeneral.autoStartLaunchShow')}
+          </button>
+          <button
+            type="button"
+            on:click={() => updateAutoStartLaunchMode(true)}
+            class="segment-btn {config.auto_start_silent ? 'settings-segment-active' : 'settings-segment-base'}"
+          >
+            {t('settingsGeneral.autoStartLaunchSilent')}
+          </button>
+        </div>
+      </div>
+    {/if}
 
     <hr class="border-slate-200 dark:border-slate-700" />
 

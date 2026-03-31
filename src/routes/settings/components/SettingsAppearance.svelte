@@ -27,6 +27,7 @@
   let avatarOpacitySaving = false;
   let avatarScaleTimer = null;
   let avatarOpacityTimer = null;
+  const breakReminderIntervals = [30, 45, 50, 60, 90, 120];
   let blurLabels = [];
   let avatarToggleUi;
 
@@ -143,6 +144,19 @@
     config.avatar_opacity = nextOpacity;
     dispatch('change', config);
     queueAvatarOpacitySave(nextOpacity);
+  }
+
+  function toggleBreakReminder() {
+    if (!config.avatar_enabled) {
+      return;
+    }
+
+    config.break_reminder_enabled = !config.break_reminder_enabled;
+    dispatch('change', config);
+  }
+
+  function handleBreakReminderIntervalChange() {
+    dispatch('change', config);
   }
 
   function handleBgFileSelect(event) {
@@ -308,6 +322,47 @@
         <span>{t('settingsAppearance.moreSolid')}</span>
       </div>
     </div>
+
+    <hr class="border-slate-200 dark:border-slate-700" />
+
+    <div class="flex items-center justify-between gap-4">
+      <div>
+        <div class="settings-text">{t('settingsAppearance.breakReminder')}</div>
+        <div class="settings-muted mt-0.5">{t('settingsAppearance.breakReminderDescription')}</div>
+        {#if !config.avatar_enabled}
+          <div class="settings-muted mt-1 text-[12px]">{t('settingsAppearance.breakReminderRequiresAvatar')}</div>
+        {/if}
+      </div>
+      <button
+        type="button"
+        on:click={toggleBreakReminder}
+        class="switch-track {config.break_reminder_enabled && config.avatar_enabled ? 'bg-primary-500' : 'bg-slate-300 dark:bg-slate-600'} {!config.avatar_enabled ? 'cursor-not-allowed opacity-50' : ''}"
+        disabled={!config.avatar_enabled}
+        aria-pressed={config.break_reminder_enabled}
+      >
+        <span class="switch-thumb {config.break_reminder_enabled && config.avatar_enabled ? 'translate-x-5' : 'translate-x-0'}"></span>
+      </button>
+    </div>
+
+    {#if config.break_reminder_enabled}
+      <div class="settings-block pt-3 border-t border-slate-200 dark:border-slate-700">
+        <label for="break-reminder-interval" class="settings-label mb-1.5">
+          {t('settingsAppearance.breakReminderInterval')}
+        </label>
+        <select
+          id="break-reminder-interval"
+          bind:value={config.break_reminder_interval_minutes}
+          on:change={handleBreakReminderIntervalChange}
+          class="control-input"
+          disabled={!config.avatar_enabled}
+        >
+          {#each breakReminderIntervals as interval}
+            <option value={interval}>{interval} 分钟</option>
+          {/each}
+        </select>
+        <p class="settings-note">{t('settingsAppearance.breakReminderHint')}</p>
+      </div>
+    {/if}
   </div>
 </div>
 

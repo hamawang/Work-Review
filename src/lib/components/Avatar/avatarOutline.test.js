@@ -87,3 +87,15 @@ test('状态气泡应悬浮在猫头上方，采用紧凑气泡而不是横条',
   assert.match(windowSource, /class="h-full w-\[54%\]"/);
   assert.doesNotMatch(source, /-translate-x-1\/2/);
 });
+
+test('休息提醒气泡应支持常驻显示和手动关闭', () => {
+  const source = readFileSync(new URL('./AvatarPopover.svelte', import.meta.url), 'utf8');
+  const windowSource = readFileSync(new URL('../../../routes/avatar/AvatarWindow.svelte', import.meta.url), 'utf8');
+
+  assert.match(source, /export let onClose = \(\) => \{\};/);
+  assert.match(source, /bubble\?\.persistent/);
+  assert.match(source, /on:click=\{onClose\}/);
+  assert.match(source, /aria-label="关闭提醒"/);
+  assert.match(windowSource, /<AvatarPopover \{bubble\} onClose=\{dismissBubble\} \/>/);
+  assert.match(windowSource, /if \(!payload\?\.persistent\)/);
+});

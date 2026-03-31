@@ -45,6 +45,11 @@
       'zh-TW': '先放鬆一下，待會再繼續推進。',
       en: 'Take a short break, then continue when you are ready.',
     },
+    '该休息一下了，起来活动活动吧。': {
+      'zh-CN': '该休息一下了，起来活动活动吧。',
+      'zh-TW': '該休息一下了，起來活動活動吧。',
+      en: 'Time for a break. Stand up and stretch a bit.',
+    },
     '开始整理日报，稍等我一下。': {
       'zh-CN': '开始整理日报，稍等我一下。',
       'zh-TW': '開始整理日報，稍等我一下。',
@@ -67,6 +72,10 @@
       return null;
     }
 
+    if (payload.clear) {
+      return payload;
+    }
+
     const localizedMessage =
       RUNTIME_BUBBLE_MESSAGES[payload.message]?.[nextLocale]
       || payload.message;
@@ -79,13 +88,31 @@
 
   $: bubble = localizeBubblePayload(bubbleSource, currentLocale);
 
+  function clearBubble() {
+    bubbleSource = null;
+    clearTimeout(bubbleTimer);
+    bubbleTimer = null;
+  }
+
   function showBubble(payload) {
+    if (payload?.clear) {
+      clearBubble();
+      return;
+    }
+
     bubbleSource = payload;
     clearTimeout(bubbleTimer);
-    bubbleTimer = setTimeout(() => {
-      bubbleSource = null;
-      bubbleTimer = null;
-    }, payload?.duration ?? 4200);
+
+    if (!payload?.persistent) {
+      bubbleTimer = setTimeout(() => {
+        bubbleSource = null;
+        bubbleTimer = null;
+      }, payload?.durationMs ?? payload?.duration ?? 4200);
+    }
+  }
+
+  function dismissBubble() {
+    clearBubble();
   }
 
   async function openMainWindow() {
@@ -226,7 +253,7 @@
 </script>
 
 <div class="relative h-screen w-screen overflow-visible bg-transparent select-none">
-  <AvatarPopover {bubble} />
+  <AvatarPopover {bubble} onClose={dismissBubble} />
 
   <div class="h-full w-[54%]">
     <AvatarCanvas
