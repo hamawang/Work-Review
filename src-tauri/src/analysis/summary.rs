@@ -20,7 +20,7 @@ fn format_domain_label(domain: &crate::database::DomainUsage, locale: AppLocale)
                 AppLocale::En => format!("{} ({})", domain.domain, semantic_category),
                 _ => format!("{}（{}）", domain.domain, semantic_category),
             }
-        },
+        }
         _ => domain.domain.clone(),
     }
 }
@@ -351,10 +351,22 @@ impl SummaryAnalyzer {
 
 **今日小结**"#,
                 format_duration_for_locale(stats.total_duration, self.locale),
-                if apps_list.is_empty() { empty_value(self.locale).to_string() } else { apps_list },
-                if urls_list.is_empty() { empty_value(self.locale).to_string() } else { urls_list },
+                if apps_list.is_empty() {
+                    empty_value(self.locale).to_string()
+                } else {
+                    apps_list
+                },
+                if urls_list.is_empty() {
+                    empty_value(self.locale).to_string()
+                } else {
+                    urls_list
+                },
                 hourly_summary,
-                if top_keywords.is_empty() { empty_value(self.locale).to_string() } else { top_keywords }
+                if top_keywords.is_empty() {
+                    empty_value(self.locale).to_string()
+                } else {
+                    top_keywords
+                }
             ),
             AppLocale::ZhTw => format!(
                 r#"請根據以下資料，生成一份面向使用者的工作日報 AI 分析補充。重點是提煉資訊與給出洞察，不要逐條重述原始資料。
@@ -386,10 +398,22 @@ impl SummaryAnalyzer {
 
 **今日小結**"#,
                 format_duration_for_locale(stats.total_duration, self.locale),
-                if apps_list.is_empty() { empty_value(self.locale).to_string() } else { apps_list },
-                if urls_list.is_empty() { empty_value(self.locale).to_string() } else { urls_list },
+                if apps_list.is_empty() {
+                    empty_value(self.locale).to_string()
+                } else {
+                    apps_list
+                },
+                if urls_list.is_empty() {
+                    empty_value(self.locale).to_string()
+                } else {
+                    urls_list
+                },
                 hourly_summary,
-                if top_keywords.is_empty() { empty_value(self.locale).to_string() } else { top_keywords }
+                if top_keywords.is_empty() {
+                    empty_value(self.locale).to_string()
+                } else {
+                    top_keywords
+                }
             ),
             AppLocale::En => format!(
                 r#"Use the data below to write the AI analysis section of a daily work report. Focus on insight and synthesis rather than repeating raw numbers line by line.
@@ -421,10 +445,22 @@ Write in English and use exactly these four section headings:
 
 **Daily Wrap-up**"#,
                 format_duration_for_locale(stats.total_duration, self.locale),
-                if apps_list.is_empty() { empty_value(self.locale).to_string() } else { apps_list },
-                if urls_list.is_empty() { empty_value(self.locale).to_string() } else { urls_list },
+                if apps_list.is_empty() {
+                    empty_value(self.locale).to_string()
+                } else {
+                    apps_list
+                },
+                if urls_list.is_empty() {
+                    empty_value(self.locale).to_string()
+                } else {
+                    urls_list
+                },
                 hourly_summary,
-                if top_keywords.is_empty() { empty_value(self.locale).to_string() } else { top_keywords }
+                if top_keywords.is_empty() {
+                    empty_value(self.locale).to_string()
+                } else {
+                    top_keywords
+                }
             ),
         };
 
@@ -511,7 +547,9 @@ impl Analyzer for SummaryAnalyzer {
                     report.push_str("## 二、時間分配\n\n| 類別 | 時長 | 佔比 |\n|:--|--:|--:|\n");
                 }
                 AppLocale::En => {
-                    report.push_str("## 2. Time Allocation\n\n| Category | Duration | Share |\n|:--|--:|--:|\n");
+                    report.push_str(
+                        "## 2. Time Allocation\n\n| Category | Duration | Share |\n|:--|--:|--:|\n",
+                    );
                 }
             }
 
@@ -533,8 +571,12 @@ impl Analyzer for SummaryAnalyzer {
 
         if !stats.app_usage.is_empty() {
             report.push_str(match locale {
-                AppLocale::ZhCn => "## 三、应用使用明细\n\n| 序号 | 应用名称 | 使用时长 |\n|--:|:--|--:|\n",
-                AppLocale::ZhTw => "## 三、應用使用明細\n\n| 序號 | 應用名稱 | 使用時長 |\n|--:|:--|--:|\n",
+                AppLocale::ZhCn => {
+                    "## 三、应用使用明细\n\n| 序号 | 应用名称 | 使用时长 |\n|--:|:--|--:|\n"
+                }
+                AppLocale::ZhTw => {
+                    "## 三、應用使用明細\n\n| 序號 | 應用名稱 | 使用時長 |\n|--:|:--|--:|\n"
+                }
                 AppLocale::En => "## 3. App Details\n\n| # | App | Duration |\n|--:|:--|--:|\n",
             });
             for (index, app) in stats.app_usage.iter().enumerate() {
@@ -560,9 +602,15 @@ impl Analyzer for SummaryAnalyzer {
 
         if !stats.domain_usage.is_empty() {
             report.push_str(match locale {
-                AppLocale::ZhCn => "## 五、网站访问明细\n\n| 序号 | 网站域名 | 访问时长 |\n|--:|:--|--:|\n",
-                AppLocale::ZhTw => "## 五、網站造訪明細\n\n| 序號 | 網站網域 | 造訪時長 |\n|--:|:--|--:|\n",
-                AppLocale::En => "## 5. Website Details\n\n| # | Domain | Duration |\n|--:|:--|--:|\n",
+                AppLocale::ZhCn => {
+                    "## 五、网站访问明细\n\n| 序号 | 网站域名 | 访问时长 |\n|--:|:--|--:|\n"
+                }
+                AppLocale::ZhTw => {
+                    "## 五、網站造訪明細\n\n| 序號 | 網站網域 | 造訪時長 |\n|--:|:--|--:|\n"
+                }
+                AppLocale::En => {
+                    "## 5. Website Details\n\n| # | Domain | Duration |\n|--:|:--|--:|\n"
+                }
             });
             for (index, domain) in stats.domain_usage.iter().enumerate() {
                 report.push_str(&format!(
@@ -597,7 +645,10 @@ impl Analyzer for SummaryAnalyzer {
                 .collect(),
         );
 
-        let ai_content = match self.generate_ai_content(&self.build_ai_prompt(date, stats, activities)).await {
+        let ai_content = match self
+            .generate_ai_content(&self.build_ai_prompt(date, stats, activities))
+            .await
+        {
             Ok(content) if !content.is_empty() => (content, true),
             Ok(_) | Err(_) => (self.generate_fallback_ai_content(&apps_list), false),
         };

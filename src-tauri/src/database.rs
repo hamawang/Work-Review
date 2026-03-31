@@ -1654,14 +1654,19 @@ impl Database {
             })
             .collect();
 
-        activities.sort_by(|(left_start, left_activity), (right_start, right_activity)| {
-            left_start
-                .cmp(right_start)
-                .then_with(|| left_activity.timestamp.cmp(&right_activity.timestamp))
-                .then_with(|| left_activity.id.cmp(&right_activity.id))
-        });
+        activities.sort_by(
+            |(left_start, left_activity), (right_start, right_activity)| {
+                left_start
+                    .cmp(right_start)
+                    .then_with(|| left_activity.timestamp.cmp(&right_activity.timestamp))
+                    .then_with(|| left_activity.id.cmp(&right_activity.id))
+            },
+        );
 
-        Ok(activities.into_iter().map(|(_, activity)| activity).collect())
+        Ok(activities
+            .into_iter()
+            .map(|(_, activity)| activity)
+            .collect())
     }
 
     /// 检查指定小时是否已有摘要

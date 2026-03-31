@@ -850,7 +850,10 @@ mod tests {
     #[test]
     fn minimax应使用_openai_兼容配置() {
         assert!(AiProvider::MiniMax.is_openai_compatible());
-        assert_eq!(AiProvider::MiniMax.default_endpoint(), "https://api.minimaxi.com/v1");
+        assert_eq!(
+            AiProvider::MiniMax.default_endpoint(),
+            "https://api.minimaxi.com/v1"
+        );
         assert_eq!(AiProvider::MiniMax.default_model(), "MiniMax-M2.5");
     }
 

@@ -609,6 +609,37 @@ fn monitoring_poll_interval_ms() -> u64 {
     monitoring_poll_interval_ms_for_platform(cfg!(target_os = "macos"))
 }
 
+const MIN_CAPTURE_INTERVAL_MS: u128 = 3000;
+const MIN_BROWSER_CHANGE_CAPTURE_INTERVAL_MS: u128 = 1200;
+
+fn should_probe_browser_url_before_change_detection(
+    app_name: &str,
+    window_title: &str,
+    last_app_name: Option<&str>,
+    last_window_title: Option<&str>,
+) -> bool {
+    monitor::is_browser_app(app_name)
+        && !window_title.is_empty()
+        && last_app_name == Some(app_name)
+        && last_window_title == Some(window_title)
+}
+
+fn browser_change_capture_min_interval_ms(
+    app_name: &str,
+    title_changed: bool,
+    url_changed: bool,
+) -> u128 {
+    if monitor::is_browser_app(app_name) && (title_changed || url_changed) {
+        MIN_BROWSER_CHANGE_CAPTURE_INTERVAL_MS
+    } else {
+        MIN_CAPTURE_INTERVAL_MS
+    }
+}
+
+fn should_refresh_browser_url_before_record(app_name: &str, window_title: &str) -> bool {
+    monitor::is_browser_app(app_name) && !window_title.is_empty()
+}
+
 fn avatar_monitor_poll_interval_ms_for_platform(is_macos: bool, active: bool) -> u64 {
     if is_macos {
         if active {
@@ -917,7 +948,6 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
     let mut last_idle_log_time = std::time::Instant::now();
     let mut is_currently_idle = false; // 当前是否处于空闲状态
 
-    const MIN_CAPTURE_INTERVAL_MS: u128 = 3000; // 最小截图间隔3秒（防抖）
     let poll_interval_ms = monitoring_poll_interval_ms(); // 桌宠状态和窗口切换检测优先更快反馈
 
     // OCR 并发限制：最多 2 个 OCR 任务同时运行，防止任务堆积消耗内存
@@ -974,7 +1004,7 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
         // 获取当前活动窗口
         // 失败原因：Windows 睡眠/待机/UAC 时无前台窗口、macOS 权限不足等
         // 此时重置计时器，避免累积的时长被错误归属到下一个真实应用
-        let mut active_window = match monitor::get_active_window_fast() {
+        let mut active_window = match monitor::get_active_window() {
             Ok(w) => w,
             Err(_) => {
                 last_capture_time = std::time::Instant::now();
@@ -1012,6 +1042,29 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                     active_window.window_title
                 );
                 continue;
+            }
+        }
+
+        let should_probe_browser_url = should_probe_browser_url_before_change_detection(
+            &active_window.app_name,
+            &active_window.window_title,
+            last_app_name.as_deref(),
+            last_app_window_title.as_deref(),
+        );
+        if should_probe_browser_url {
+            if let Some(resolved_url) = monitor::resolve_browser_url_for_window(
+                &active_window.app_name,
+                &active_window.window_title,
+            ) {
+                if last_browser_url.as_deref() != Some(resolved_url.as_str()) {
+                    log::debug!(
+                        "浏览器 URL 预探测命中: {} | {} -> {}",
+                        active_window.app_name,
+                        active_window.window_title,
+                        resolved_url
+                    );
+                }
+                active_window.browser_url = Some(resolved_url);
             }
         }
 
@@ -1069,6 +1122,11 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
             Some(last) => last != &active_window.app_name || url_changed || title_changed,
             None => true,
         };
+        let capture_min_interval_ms = browser_change_capture_min_interval_ms(
+            &active_window.app_name,
+            title_changed,
+            url_changed,
+        );
 
         // 计算距离上次截图的时间
         let elapsed_since_capture = last_capture_time.elapsed();
@@ -1108,8 +1166,12 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
         let should_take_screenshot = if elapsed_secs >= screenshot_interval {
             log::debug!("定时截图触发");
             true
-        } else if app_changed && elapsed_since_capture.as_millis() >= MIN_CAPTURE_INTERVAL_MS {
-            log::debug!("应用切换截图触发");
+        } else if app_changed && elapsed_since_capture.as_millis() >= capture_min_interval_ms {
+            if capture_min_interval_ms < MIN_CAPTURE_INTERVAL_MS {
+                log::debug!("浏览器导航截图触发");
+            } else {
+                log::debug!("应用切换截图触发");
+            }
             true
         } else {
             false
@@ -1129,11 +1191,24 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
             continue;
         }
 
-        if monitor::is_browser_app(&active_window.app_name) && active_window.browser_url.is_none() {
-            active_window.browser_url = monitor::resolve_browser_url_for_window(
+        if should_refresh_browser_url_before_record(
+            &active_window.app_name,
+            &active_window.window_title,
+        ) {
+            if let Some(resolved_url) = monitor::resolve_browser_url_for_window(
                 &active_window.app_name,
                 &active_window.window_title,
-            );
+            ) {
+                if active_window.browser_url.as_deref() != Some(resolved_url.as_str()) {
+                    log::debug!(
+                        "浏览器 URL 落库前刷新: {} | {} -> {}",
+                        active_window.app_name,
+                        active_window.window_title,
+                        resolved_url
+                    );
+                }
+                active_window.browser_url = Some(resolved_url);
+            }
             url_changed = match (&last_browser_url, &active_window.browser_url) {
                 (Some(l), Some(r)) => l != r,
                 (None, None) => false,
@@ -2441,11 +2516,13 @@ mod tests {
     use super::{
         avatar_activity_decision, avatar_monitor_poll_interval_ms,
         avatar_monitor_poll_interval_ms_for_platform, avatar_transition_decision,
-        effective_dock_visibility, main_window_close_behavior, monitoring_poll_interval_ms,
+        browser_change_capture_min_interval_ms, effective_dock_visibility,
+        main_window_close_behavior, monitoring_poll_interval_ms,
         monitoring_poll_interval_ms_for_platform, recording_loop_decision,
         resolve_activity_classification, screen_lock_check_interval_ms_for_platform,
-        should_confirm_idle, should_prevent_exit, tray_recording_toggle_action,
-        tray_recording_toggle_label, MainWindowCloseBehavior, RecordingToggleAction,
+        should_confirm_idle, should_prevent_exit, should_probe_browser_url_before_change_detection,
+        tray_recording_toggle_action, tray_recording_toggle_label, MainWindowCloseBehavior,
+        RecordingToggleAction,
     };
     use crate::avatar_engine::{apply_avatar_opacity, default_avatar_state, derive_avatar_state};
     use crate::config::{AppConfig, WebsiteSemanticRule};
@@ -2538,6 +2615,48 @@ mod tests {
     #[test]
     fn mac主监控轮询间隔应降频() {
         assert_eq!(monitoring_poll_interval_ms_for_platform(true), 1500);
+    }
+
+    #[test]
+    fn 同标题浏览器页应在切换判定前主动探测真实网址() {
+        assert!(should_probe_browser_url_before_change_detection(
+            "Google Chrome",
+            "项目文档",
+            Some("Google Chrome"),
+            Some("项目文档"),
+        ));
+        assert!(!should_probe_browser_url_before_change_detection(
+            "Google Chrome",
+            "项目文档",
+            Some("Google Chrome"),
+            Some("另一个标签页"),
+        ));
+        assert!(!should_probe_browser_url_before_change_detection(
+            "Cursor",
+            "main.rs",
+            Some("Cursor"),
+            Some("main.rs"),
+        ));
+    }
+
+    #[test]
+    fn 浏览器导航变化应使用更短的截图冷却() {
+        assert_eq!(
+            browser_change_capture_min_interval_ms("Google Chrome", true, false),
+            1200
+        );
+        assert_eq!(
+            browser_change_capture_min_interval_ms("Google Chrome", false, true),
+            1200
+        );
+        assert_eq!(
+            browser_change_capture_min_interval_ms("Google Chrome", false, false),
+            3000
+        );
+        assert_eq!(
+            browser_change_capture_min_interval_ms("Cursor", true, false),
+            3000
+        );
     }
 
     #[test]

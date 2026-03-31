@@ -685,12 +685,8 @@ fn build_assistant_system_prompt(locale: AppLocale) -> &'static str {
 
 fn assistant_output_language_requirement(locale: AppLocale) -> &'static str {
     match locale {
-        AppLocale::ZhCn => {
-            "8. 最终回答必须使用简体中文，不要混入英文标题或繁体写法。\n"
-        }
-        AppLocale::ZhTw => {
-            "8. 最終回答必須使用繁體中文，不要混入簡體標題或英文標題。\n"
-        }
+        AppLocale::ZhCn => "8. 最终回答必须使用简体中文，不要混入英文标题或繁体写法。\n",
+        AppLocale::ZhTw => "8. 最終回答必須使用繁體中文，不要混入簡體標題或英文標題。\n",
         AppLocale::En => {
             "8. The final answer must be written in English, including headings and bullets.\n"
         }
@@ -2445,7 +2441,10 @@ pub async fn generate_report(
     // 如果不是强制重新生成，先检查缓存
     if !force.unwrap_or(false) {
         let state_guard = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
-        if let Ok(Some(cached)) = state_guard.database.get_report(&date, Some(report_locale_code)) {
+        if let Ok(Some(cached)) = state_guard
+            .database
+            .get_report(&date, Some(report_locale_code))
+        {
             log::info!("使用缓存日报: {date}");
             return Ok(cached.content);
         }
@@ -2591,7 +2590,9 @@ pub async fn get_saved_report(
 ) -> Result<Option<DailyReport>, AppError> {
     let report_locale = AppLocale::from_option(locale.as_deref());
     let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
-    state.database.get_report(&date, Some(report_locale.as_code()))
+    state
+        .database
+        .get_report(&date, Some(report_locale.as_code()))
 }
 
 #[tauri::command]

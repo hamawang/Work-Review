@@ -259,7 +259,9 @@ fn is_probable_domain(value: &str) -> bool {
     }
 
     let tld = labels.last().copied().unwrap_or_default();
-    if tld.len() < 2 || !tld.chars().all(|c| c.is_ascii_alphabetic()) {
+    // TLD 最少 2 字符、最多 12 字符，且必须全是 ASCII 字母
+    // 上限防止 OCR 丢失斜杠后把域名和路径拼为超长假 TLD（如 github.comwm94i）
+    if tld.len() < 2 || tld.len() > 12 || !tld.chars().all(|c| c.is_ascii_alphabetic()) {
         return false;
     }
 
@@ -1471,6 +1473,32 @@ https://www.google.com.hk/search?q=张凌赫
         );
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn 浏览器_url候选应优先地址栏值字段() {
+        let output = r#"
+title	https://linux.dofttopic
+name	https://linux.dofttopic
+value	https://linux.do/latest
+"#;
+
+        assert_eq!(
+            best_browser_url_candidate_from_output(output),
+            Some("https://linux.do/latest".to_string())
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn 可疑的_host_only_浏览器候选应被忽略() {
+        let output = r#"
+title	https://linux.dofttopic
+name	https://linux.dofttopic
+"#;
+
+        assert_eq!(best_browser_url_candidate_from_output(output), None);
+    }
+
     #[test]
     fn 应从_profiles_ini_解析默认_profile目录() {
         let ini = r#"
@@ -2079,6 +2107,103 @@ fn browser_url_system_events_process_name_macos(app_lower: &str) -> Option<&'sta
 }
 
 #[cfg(target_os = "macos")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BrowserUrlCandidateSource {
+    Value,
+    Description,
+    Title,
+    Name,
+    Unknown,
+}
+
+#[cfg(target_os = "macos")]
+fn parse_browser_url_candidate_line(raw_line: &str) -> (BrowserUrlCandidateSource, &str) {
+    let trimmed = raw_line.trim();
+
+    if let Some((prefix, value)) = trimmed.split_once('\t') {
+        let source = match prefix.trim() {
+            "value" => BrowserUrlCandidateSource::Value,
+            "description" => BrowserUrlCandidateSource::Description,
+            "title" => BrowserUrlCandidateSource::Title,
+            "name" => BrowserUrlCandidateSource::Name,
+            _ => BrowserUrlCandidateSource::Unknown,
+        };
+
+        if source != BrowserUrlCandidateSource::Unknown {
+            return (source, value.trim());
+        }
+    }
+
+    (BrowserUrlCandidateSource::Unknown, trimmed)
+}
+
+#[cfg(target_os = "macos")]
+fn browser_url_candidate_source_bonus(source: BrowserUrlCandidateSource) -> i32 {
+    match source {
+        BrowserUrlCandidateSource::Value => 80,
+        BrowserUrlCandidateSource::Description => 35,
+        BrowserUrlCandidateSource::Title => 10,
+        BrowserUrlCandidateSource::Name => 5,
+        BrowserUrlCandidateSource::Unknown => 0,
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn http_url_host_and_rest(url: &str) -> Option<(&str, &str)> {
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))?;
+    Some(split_host_and_rest(rest))
+}
+
+#[cfg(target_os = "macos")]
+fn is_suspicious_host_only_browser_candidate(url: &str) -> bool {
+    let Some((host, rest)) = http_url_host_and_rest(url) else {
+        return false;
+    };
+
+    if !rest.is_empty() {
+        return false;
+    }
+
+    let host = split_host_port(host).0.trim_end_matches('.');
+    if host.is_empty() || host == "localhost" || is_probable_ipv4(host) {
+        return false;
+    }
+
+    let labels: Vec<&str> = host.split('.').collect();
+    if labels.len() != 2 {
+        return false;
+    }
+
+    let tld = labels[1].trim().to_lowercase();
+    if tld.len() <= 6 || !tld.chars().all(|c| c.is_ascii_alphabetic()) {
+        return false;
+    }
+
+    matches!(
+        &tld[..2],
+        "ai" | "cc"
+            | "cn"
+            | "de"
+            | "do"
+            | "fr"
+            | "hk"
+            | "id"
+            | "in"
+            | "io"
+            | "jp"
+            | "kr"
+            | "me"
+            | "ru"
+            | "sg"
+            | "tv"
+            | "uk"
+            | "us"
+    )
+}
+
+#[cfg(target_os = "macos")]
 fn browser_url_ui_script_macos(process_name: &str) -> String {
     format!(
         r#"set output to ""
@@ -2111,19 +2236,19 @@ on collect_url_candidates(rootElem)
                     if roleName is "AXTextField" or roleName is "AXTextArea" or roleName is "AXComboBox" then
                         try
                             set candidateValue to (value of elem) as text
-                            if candidateValue is not "" then set output to output & candidateValue & linefeed
+                            if candidateValue is not "" then set output to output & "value" & tab & candidateValue & linefeed
                         end try
                         try
                             set candidateValue to (description of elem) as text
-                            if candidateValue is not "" then set output to output & candidateValue & linefeed
+                            if candidateValue is not "" then set output to output & "description" & tab & candidateValue & linefeed
                         end try
                         try
                             set candidateValue to (title of elem) as text
-                            if candidateValue is not "" then set output to output & candidateValue & linefeed
+                            if candidateValue is not "" then set output to output & "title" & tab & candidateValue & linefeed
                         end try
                         try
                             set candidateValue to (name of elem) as text
-                            if candidateValue is not "" then set output to output & candidateValue & linefeed
+                            if candidateValue is not "" then set output to output & "name" & tab & candidateValue & linefeed
                         end try
                     end if
                 end try
@@ -2142,7 +2267,7 @@ fn best_browser_url_candidate_from_output(output: &str) -> Option<String> {
     let mut best_match: Option<(i32, String)> = None;
 
     for raw_line in output.lines() {
-        let raw = raw_line.trim();
+        let (source, raw) = parse_browser_url_candidate_line(raw_line);
         if raw.is_empty() {
             continue;
         }
@@ -2151,17 +2276,30 @@ fn best_browser_url_candidate_from_output(output: &str) -> Option<String> {
             continue;
         };
 
-        let mut score = 40;
+        if source != BrowserUrlCandidateSource::Value
+            && is_suspicious_host_only_browser_candidate(&url)
+        {
+            continue;
+        }
+
+        let mut score = 40 + browser_url_candidate_source_bonus(source);
         if raw.starts_with("http://") || raw.starts_with("https://") || raw.starts_with("file://") {
             score += 40;
         }
         if raw.contains("://") {
             score += 20;
         }
-        if raw.contains('/') || raw.contains('?') || raw.contains('#') {
+        if let Some((_, rest)) = http_url_host_and_rest(&url) {
+            if !rest.is_empty() {
+                score += 18;
+            }
+            if rest.contains('?') || rest.contains('#') {
+                score += 8;
+            }
+        } else if raw.contains('/') || raw.contains('?') || raw.contains('#') {
             score += 10;
         }
-        if raw.len() > 24 {
+        if url.len() > 24 {
             score += 5;
         }
 
@@ -2185,7 +2323,7 @@ fn browser_url_candidates_preview_from_output(output: &str, max_items: usize) ->
     let mut items = Vec::new();
 
     for raw_line in output.lines() {
-        let raw = raw_line.trim();
+        let (_, raw) = parse_browser_url_candidate_line(raw_line);
         if raw.is_empty() {
             continue;
         }

@@ -383,7 +383,10 @@ pub fn generate_stats_summary_for_locale(stats: &DailyStats, locale: AppLocale) 
                 "- Total work duration: {}\n",
                 format_duration_for_locale(stats.total_duration, locale)
             ));
-            summary.push_str(&format!("- Screenshot count: {}\n\n", stats.screenshot_count));
+            summary.push_str(&format!(
+                "- Screenshot count: {}\n\n",
+                stats.screenshot_count
+            ));
             summary.push_str("### App usage\n\n");
         }
     }

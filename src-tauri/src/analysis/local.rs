@@ -20,7 +20,7 @@ fn format_domain_label(domain: &crate::database::DomainUsage, locale: AppLocale)
                 AppLocale::En => format!("{} ({})", domain.domain, semantic_category),
                 _ => format!("{}（{}）", domain.domain, semantic_category),
             }
-        },
+        }
         _ => domain.domain.clone(),
     }
 }
@@ -128,8 +128,16 @@ impl LocalAnalyzer {
 
 不要输出额外前言或解释。"#,
                 format_duration_for_locale(stats.total_duration, self.locale),
-                if apps_list.is_empty() { empty_value(self.locale).to_string() } else { apps_list },
-                if urls_list.is_empty() { empty_value(self.locale).to_string() } else { urls_list },
+                if apps_list.is_empty() {
+                    empty_value(self.locale).to_string()
+                } else {
+                    apps_list
+                },
+                if urls_list.is_empty() {
+                    empty_value(self.locale).to_string()
+                } else {
+                    urls_list
+                },
                 if keywords.is_empty() {
                     empty_value(self.locale).to_string()
                 } else {
@@ -160,8 +168,16 @@ impl LocalAnalyzer {
 
 不要輸出額外前言或解釋。"#,
                 format_duration_for_locale(stats.total_duration, self.locale),
-                if apps_list.is_empty() { empty_value(self.locale).to_string() } else { apps_list },
-                if urls_list.is_empty() { empty_value(self.locale).to_string() } else { urls_list },
+                if apps_list.is_empty() {
+                    empty_value(self.locale).to_string()
+                } else {
+                    apps_list
+                },
+                if urls_list.is_empty() {
+                    empty_value(self.locale).to_string()
+                } else {
+                    urls_list
+                },
                 if keywords.is_empty() {
                     empty_value(self.locale).to_string()
                 } else {
@@ -192,8 +208,16 @@ Give 1 concrete and practical suggestion for tomorrow.
 
 Do not add any extra preface or explanation."#,
                 format_duration_for_locale(stats.total_duration, self.locale),
-                if apps_list.is_empty() { empty_value(self.locale).to_string() } else { apps_list },
-                if urls_list.is_empty() { empty_value(self.locale).to_string() } else { urls_list },
+                if apps_list.is_empty() {
+                    empty_value(self.locale).to_string()
+                } else {
+                    apps_list
+                },
+                if urls_list.is_empty() {
+                    empty_value(self.locale).to_string()
+                } else {
+                    urls_list
+                },
                 if keywords.is_empty() {
                     empty_value(self.locale).to_string()
                 } else {
@@ -253,7 +277,9 @@ Do not add any extra preface or explanation."#,
         let screenshot_prompt = match self.locale {
             AppLocale::ZhCn => "请简要描述这张截图里的工作内容，用中文回答，限制在 50 字以内。",
             AppLocale::ZhTw => "請簡要描述這張截圖裡的工作內容，請用繁體中文回答，限制在 50 字內。",
-            AppLocale::En => "Briefly describe what work is shown in this screenshot in under 50 words.",
+            AppLocale::En => {
+                "Briefly describe what work is shown in this screenshot in under 50 words."
+            }
         };
 
         let response = self
@@ -415,7 +441,8 @@ impl Analyzer for LocalAnalyzer {
                         report.push_str("\n## 七、专注度分析\n\n");
                         report.push_str("今天整体节奏较稳定，可以继续保持当前的工作推进方式。\n");
                         report.push_str("\n## 八、明日建议\n\n");
-                        report.push_str("建议为核心任务预留更完整的连续时间段，减少被打断的次数。\n");
+                        report
+                            .push_str("建议为核心任务预留更完整的连续时间段，减少被打断的次数。\n");
                         report.push_str("\n---\n*注：AI 分析暂不可用，使用基础模板生成。*");
                     }
                     AppLocale::ZhTw => {
@@ -431,7 +458,8 @@ impl Analyzer for LocalAnalyzer {
                         report.push_str("\n## 七、專注度分析\n\n");
                         report.push_str("今天整體節奏較穩定，可以延續目前的工作推進方式。\n");
                         report.push_str("\n## 八、明日建議\n\n");
-                        report.push_str("建議為核心任務預留更完整的連續時間段，減少被打斷的次數。\n");
+                        report
+                            .push_str("建議為核心任務預留更完整的連續時間段，減少被打斷的次數。\n");
                         report.push_str("\n---\n*註：AI 分析暫時不可用，目前使用基礎模板生成。*");
                     }
                     AppLocale::En => {
