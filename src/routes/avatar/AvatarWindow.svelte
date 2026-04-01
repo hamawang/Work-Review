@@ -37,6 +37,7 @@
   let lastSavedPositionKey = null;
   let unsubscribeLocale = () => {};
   let unlistenLocaleChanged = () => {};
+  let handleVisibilityChange = null;
   $: currentLocale = $locale;
 
   const RUNTIME_BUBBLE_MESSAGES = {
@@ -161,6 +162,10 @@
 
   function scheduleNextMotionStep() {
     clearTimeout(motionTimer);
+    if (document.hidden) {
+      motionTimer = null;
+      return;
+    }
     const delay = getAvatarMotionStepDelay(state.mode, state.contextLabel, motionBeat);
     motionTimer = setTimeout(() => {
       motionBeat = (motionBeat + 1) % 96;
@@ -176,7 +181,19 @@
     unsubscribeLocale = locale.subscribe((nextLocale) => {
       applyLocaleToDocument(nextLocale);
     });
-    scheduleNextMotionStep();
+    if (!document.hidden) {
+      scheduleNextMotionStep();
+    }
+
+    handleVisibilityChange = () => {
+      if (document.hidden) {
+        clearTimeout(motionTimer);
+        motionTimer = null;
+      } else {
+        scheduleNextMotionStep();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     (async () => {
       try {
@@ -243,6 +260,7 @@
       clearTimeout(transitionTimer);
       clearTimeout(positionSaveTimer);
       clearTimeout(motionTimer);
+      if (handleVisibilityChange) document.removeEventListener('visibilitychange', handleVisibilityChange);
       unsubscribeLocale();
       unlistenLocaleChanged();
       unlistenState();

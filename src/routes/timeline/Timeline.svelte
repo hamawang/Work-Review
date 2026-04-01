@@ -36,6 +36,7 @@
   let unlisten = null;
   let currentTime = new Date();
   let clockInterval;
+  let handleVisibilityChange;
   let appIcons = {};
 
   // LRU 缓存：防止长时间运行内存无限增长
@@ -398,17 +399,34 @@
   $: isToday = selectedDate === getLocalDateString();
 
   onMount(async () => {
-    // 每秒更新时钟
-    clockInterval = setInterval(() => {
-      currentTime = new Date();
-    }, 1000);
+    if (!document.hidden) {
+      clockInterval = setInterval(() => {
+        currentTime = new Date();
+      }, 1000);
+    }
+
+    handleVisibilityChange = () => {
+      if (document.hidden) {
+        clearInterval(clockInterval);
+        clockInterval = null;
+      } else {
+        currentTime = new Date();
+        clockInterval = setInterval(() => {
+          currentTime = new Date();
+        }, 1000);
+        if (isToday) {
+          loadTimeline();
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
     
     // 初始加载通过响应式触发
     
     // 监听新截屏事件，智能更新（合并或新增）
     // 核心逻辑：后端已完成聚合，前端只按 id 替换，否则视作新活动插入
     unlisten = await listen('screenshot-taken', (event) => {
-      if (isToday) {
+      if (isToday && !document.hidden) {
         const newActivity = event.payload;
         activities = upsertTimelineActivity(activities, newActivity);
         cache.clear();
@@ -419,6 +437,7 @@
   onDestroy(() => {
     if (unlisten) unlisten();
     if (clockInterval) clearInterval(clockInterval);
+    if (handleVisibilityChange) document.removeEventListener('visibilitychange', handleVisibilityChange);
     unsubIcons();
   });
 </script>
