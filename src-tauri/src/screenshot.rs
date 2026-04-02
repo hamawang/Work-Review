@@ -8,6 +8,8 @@ use image::DynamicImage;
 use image::RgbaImage;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
+#[cfg(target_os = "macos")]
+use std::process::Command;
 
 /// 检查 macOS 屏幕录制权限（不触发授权弹窗）
 /// 使用 CGPreflightScreenCaptureAccess (macOS 10.15+)
@@ -640,8 +642,15 @@ impl ScreenshotService {
     ) -> Result<ScreenshotResult> {
         use screenshots::Screen;
 
+        let now = chrono::Local::now();
+        let date_str = now.format("%Y-%m-%d").to_string();
+        let time_str = now.format("%H%M%S_%3f").to_string();
+
+        let screenshots_dir = self.data_dir.join("screenshots").join(&date_str);
+        std::fs::create_dir_all(&screenshots_dir)?;
+
         let mut dynamic_image = if should_capture_all_displays(&self.config) {
-            self.capture_all_displays_macos()?
+            self.capture_all_displays_macos(&screenshots_dir, &time_str)?
         } else {
             let screen = if let Some((x, y)) = capture_target_point(active_window) {
                 match Screen::from_point(x, y) {
@@ -666,17 +675,11 @@ impl ScreenshotService {
                     .ok_or_else(|| AppError::Screenshot("没有找到屏幕".to_string()))?
             };
 
-            let image = screen
-                .capture()
-                .map_err(|e| AppError::Screenshot(format!("截屏失败: {e}")))?;
-
-            let orig_width = image.width();
-            let orig_height = image.height();
-
-            DynamicImage::ImageRgba8(
-                image::RgbaImage::from_raw(orig_width, orig_height, image.into_raw())
-                    .ok_or_else(|| AppError::Screenshot("图像转换失败".to_string()))?,
-            )
+            DynamicImage::ImageRgba8(self.capture_single_display_macos(
+                &screen,
+                &screenshots_dir,
+                &format!("{time_str}_display"),
+            )?)
         };
 
         let orig_width = dynamic_image.width();
@@ -691,13 +694,6 @@ impl ScreenshotService {
 
         let final_width = dynamic_image.width();
         let final_height = dynamic_image.height();
-
-        let now = chrono::Local::now();
-        let date_str = now.format("%Y-%m-%d").to_string();
-        let time_str = now.format("%H%M%S_%3f").to_string();
-
-        let screenshots_dir = self.data_dir.join("screenshots").join(&date_str);
-        std::fs::create_dir_all(&screenshots_dir)?;
 
         let filename = format!("{time_str}.jpg");
         let path = screenshots_dir.join(&filename);
@@ -734,7 +730,67 @@ impl ScreenshotService {
     }
 
     #[cfg(target_os = "macos")]
-    fn capture_all_displays_macos(&self) -> Result<DynamicImage> {
+    fn capture_single_display_macos(
+        &self,
+        screen: &screenshots::Screen,
+        screenshots_dir: &Path,
+        temp_name: &str,
+    ) -> Result<RgbaImage> {
+        match self.capture_display_with_screencapture_macos(screen, screenshots_dir, temp_name) {
+            Ok(image) => Ok(image),
+            Err(error) => {
+                log::warn!("macOS 原生 screencapture 失败，回退 screenshots crate: {error}");
+                let fallback = screen
+                    .capture()
+                    .map_err(|e| AppError::Screenshot(format!("截屏失败: {e}")))?;
+                RgbaImage::from_raw(fallback.width(), fallback.height(), fallback.into_raw())
+                    .ok_or_else(|| AppError::Screenshot("图像转换失败".to_string()))
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn capture_display_with_screencapture_macos(
+        &self,
+        screen: &screenshots::Screen,
+        screenshots_dir: &Path,
+        temp_name: &str,
+    ) -> Result<RgbaImage> {
+        let temp_png = screenshots_dir.join(format!("{temp_name}.png"));
+        let rect = macos_capture_rect(
+            screen.display_info.x,
+            screen.display_info.y,
+            screen.display_info.width,
+            screen.display_info.height,
+        );
+
+        let output = Command::new("screencapture")
+            .args(["-x", "-t", "png", "-R", &rect, &temp_png.to_string_lossy()])
+            .output()
+            .map_err(|e| AppError::Screenshot(format!("调用 screencapture 失败: {e}")))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            let _ = std::fs::remove_file(&temp_png);
+            return Err(AppError::Screenshot(format!(
+                "screencapture 截图失败: {}",
+                if stderr.is_empty() { "未知错误" } else { &stderr }
+            )));
+        }
+
+        let image = image::open(&temp_png)
+            .map_err(|e| AppError::Screenshot(format!("读取 screencapture 结果失败: {e}")))?
+            .to_rgba8();
+        let _ = std::fs::remove_file(&temp_png);
+        Ok(image)
+    }
+
+    #[cfg(target_os = "macos")]
+    fn capture_all_displays_macos(
+        &self,
+        screenshots_dir: &Path,
+        time_str: &str,
+    ) -> Result<DynamicImage> {
         use screenshots::Screen;
 
         let screens =
@@ -749,12 +805,12 @@ impl ScreenshotService {
         let mut max_x = i32::MIN;
         let mut max_y = i32::MIN;
 
-        for screen in screens {
-            let image = screen
-                .capture()
-                .map_err(|e| AppError::Screenshot(format!("截屏失败: {e}")))?;
-            let image = RgbaImage::from_raw(image.width(), image.height(), image.into_raw())
-                .ok_or_else(|| AppError::Screenshot("多屏图像转换失败".to_string()))?;
+        for (index, screen) in screens.into_iter().enumerate() {
+            let image = self.capture_single_display_macos(
+                &screen,
+                screenshots_dir,
+                &format!("{time_str}_display_{index}"),
+            )?;
             let offset_x =
                 display_pixel_offset(screen.display_info.x, screen.display_info.scale_factor);
             let offset_y =
@@ -979,6 +1035,11 @@ fn should_capture_all_displays(config: &ScreenshotConfig) -> bool {
     config.display_mode == ScreenshotDisplayMode::All
 }
 
+#[cfg(any(target_os = "macos", test))]
+fn macos_capture_rect(x: i32, y: i32, width: u32, height: u32) -> String {
+    format!("{x},{y},{width},{height}")
+}
+
 #[cfg(target_os = "macos")]
 fn display_pixel_offset(value: i32, scale_factor: f32) -> i32 {
     ((value as f32) * scale_factor.max(1.0)).round() as i32
@@ -1053,7 +1114,9 @@ fn capture_target_hmonitor(
 
 #[cfg(test)]
 mod tests {
-    use super::{capture_target_point, should_capture_all_displays, ScreenshotService};
+    use super::{
+        capture_target_point, should_capture_all_displays, ScreenshotService,
+    };
     use crate::config::{ScreenshotDisplayMode, StorageConfig};
     use crate::monitor::{ActiveWindow, WindowBounds};
     use std::path::Path;
@@ -1120,5 +1183,13 @@ mod tests {
         service.update_config(&updated_storage);
 
         assert_eq!(service.config.display_mode, ScreenshotDisplayMode::All);
+    }
+
+    #[test]
+    fn macos截图矩形应保留多屏负坐标() {
+        assert_eq!(
+            super::macos_capture_rect(-1512, -982, 1512, 982),
+            "-1512,-982,1512,982"
+        );
     }
 }
