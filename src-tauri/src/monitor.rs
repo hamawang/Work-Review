@@ -224,6 +224,11 @@ pub fn normalize_display_app_name(app_name: &str) -> String {
         "excel" => "Microsoft Excel".to_string(),
         "powerpnt" | "powerpoint" => "Microsoft PowerPoint".to_string(),
         "outlook" => "Microsoft Outlook".to_string(),
+        "mail" | "apple mail" | "邮件" => "Mail".to_string(),
+        "discover" | "org.kde.discover" => "Discover".to_string(),
+        "coreautha" | "coreauthuiagent" | "coreauthenticationuiagent" => {
+            "System Authentication".to_string()
+        }
         "explorer" => "File Explorer".to_string(),
         "windowsterminal" | "windows terminal" => "Windows Terminal".to_string(),
         "powershell" | "pwsh" => "PowerShell".to_string(),
@@ -1352,7 +1357,8 @@ mod tests {
         categorize_app, categorize_app_with_rules, decode_mozlz4_bytes,
         extract_active_tab_url_from_session_store_value, extract_url_from_title,
         find_focused_sway_node, firefox_family_profile_dir_from_ini, is_browser_app,
-        is_probable_domain, normalize_macos_frontmost_app_name, normalize_possible_url,
+        is_probable_domain, normalize_display_app_name, normalize_macos_frontmost_app_name,
+        normalize_possible_url,
         parse_gnome_focused_window_dbus_output, parse_hyprland_window_bounds,
         parse_kdotool_geometry_output, parse_xdotool_geometry_shell_output,
         remember_browser_url_log, resolve_browser_url_for_window_linux, WindowBounds,
@@ -1411,6 +1417,14 @@ mod tests {
             categorize_app_with_rules(&rules, "firefox", "搜索页"),
             "office"
         );
+    }
+
+    #[test]
+    fn 常见系统与桌面应用名应归一化为稳定显示名() {
+        assert_eq!(normalize_display_app_name("discover"), "Discover");
+        assert_eq!(normalize_display_app_name("mail"), "Mail");
+        assert_eq!(normalize_display_app_name("邮件"), "Mail");
+        assert_eq!(normalize_display_app_name("coreautha"), "System Authentication");
     }
 
     #[test]

@@ -4,6 +4,7 @@
   export let icon = '';
   export let color = 'indigo';
   export let href = null;
+  export let embedded = false;
 
   const iconColors = {
     indigo: 'text-indigo-500 dark:text-indigo-400',
@@ -22,20 +23,32 @@
     blue: 'bg-blue-50 dark:bg-blue-950/40',
     violet: 'bg-violet-50 dark:bg-violet-950/40',
   };
+
+  $: cardClass = embedded
+    ? 'block min-h-[108px] rounded-[22px] bg-slate-50/88 px-4 py-4 dark:bg-slate-900/30'
+    : 'block min-h-[116px] rounded-2xl border border-slate-100 bg-white p-5 dark:border-slate-700/60 dark:bg-slate-800/80';
+  $: iconClass = embedded
+    ? `flex h-10 w-10 items-center justify-center rounded-2xl ${iconBgs[color]} ${iconColors[color]} shrink-0`
+    : `flex h-11 w-11 items-center justify-center rounded-2xl border border-white/80 shadow-sm dark:border-slate-700/80 ${iconBgs[color]} ${iconColors[color]} shrink-0`;
+  $: valueClass = embedded
+    ? 'mt-4 text-[1.9rem] font-semibold tracking-tight leading-none text-slate-800 dark:text-white'
+    : 'mt-6 text-[2.15rem] font-semibold tracking-tight leading-none text-slate-800 dark:text-white';
+  $: interactiveClass = embedded
+    ? 'transition-all duration-200 hover:bg-slate-100/90 hover:-translate-y-0.5 dark:hover:bg-slate-900/50'
+    : 'transition-all duration-200 hover:shadow-md hover:-translate-y-0.5 cursor-pointer group';
 </script>
 
 {#if href}
   <a
     {href}
-    class="block min-h-[116px] p-5 rounded-2xl bg-white dark:bg-slate-800/80 border border-slate-100 dark:border-slate-700/60
-           transition-all duration-200 hover:shadow-md hover:-translate-y-0.5 cursor-pointer group"
+    class="{cardClass} {interactiveClass}"
   >
     <div class="flex h-full items-center justify-between gap-4">
       <div class="min-w-0 flex-1">
         <span class="text-[13px] font-medium text-slate-400 dark:text-slate-500 leading-none">{title}</span>
-        <p class="mt-6 text-[2.15rem] font-semibold text-slate-800 dark:text-white tracking-tight leading-none">{value}</p>
+        <p class={valueClass}>{value}</p>
       </div>
-      <div class="w-11 h-11 rounded-2xl border border-white/80 dark:border-slate-700/80 shadow-sm {iconBgs[color]} flex items-center justify-center {iconColors[color]} shrink-0">
+      <div class={iconClass}>
         {#if icon === 'duration'}
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 7v5l3 2m6-2a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -64,13 +77,13 @@
     </div>
   </a>
 {:else}
-  <div class="min-h-[116px] p-5 rounded-2xl bg-white dark:bg-slate-800/80 border border-slate-100 dark:border-slate-700/60">
+  <div class={cardClass}>
     <div class="flex h-full items-center justify-between gap-4">
       <div class="min-w-0 flex-1">
         <span class="text-[13px] font-medium text-slate-400 dark:text-slate-500 leading-none">{title}</span>
-        <p class="mt-6 text-[2.15rem] font-semibold text-slate-800 dark:text-white tracking-tight leading-none">{value}</p>
+        <p class={valueClass}>{value}</p>
       </div>
-      <div class="w-11 h-11 rounded-2xl border border-white/80 dark:border-slate-700/80 shadow-sm {iconBgs[color]} flex items-center justify-center {iconColors[color]} shrink-0">
+      <div class={iconClass}>
         {#if icon === 'duration'}
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 7v5l3 2m6-2a9 9 0 11-18 0 9 9 0 0118 0z" />

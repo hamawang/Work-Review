@@ -160,7 +160,10 @@ fn get_idle_seconds() -> u64 {
 fn get_idle_seconds() -> u64 {
     use std::process::Command;
 
-    if matches!(current_linux_desktop_session(), LinuxDesktopSession::Wayland) {
+    if matches!(
+        current_linux_desktop_session(),
+        LinuxDesktopSession::Wayland
+    ) {
         let output = Command::new("dbus-send")
             .args([
                 "--session",

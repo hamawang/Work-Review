@@ -598,101 +598,102 @@
   </div>
 
   <div class="overview-editorial-shell">
-  <div class="overview-command-deck mb-4 flex flex-wrap items-center gap-2">
-    <button
-      type="button"
-      class="page-control-btn {overviewMode === 'today' ? 'page-control-btn-active' : ''}"
-      on:click={() => setOverviewMode('today')}
-    >
-      {t('overview.modeToday')}
-    </button>
-    <button
-      type="button"
-      class="page-control-btn {overviewMode === 'week' ? 'page-control-btn-active' : ''}"
-      on:click={() => setOverviewMode('week')}
-    >
-      {t('overview.modeWeek')}
-    </button>
-    <button
-      type="button"
-      class="page-control-btn {overviewMode === 'date' ? 'page-control-btn-active' : ''}"
-      on:click={() => setOverviewMode('date')}
-    >
-      {t('overview.modeDate')}
-    </button>
+  <section class="page-card overview-lead-card mb-4">
+    <div class="overview-command-deck">
+      <button
+        type="button"
+        class="page-control-btn {overviewMode === 'today' ? 'page-control-btn-active' : ''}"
+        on:click={() => setOverviewMode('today')}
+      >
+        {t('overview.modeToday')}
+      </button>
+      <button
+        type="button"
+        class="page-control-btn {overviewMode === 'week' ? 'page-control-btn-active' : ''}"
+        on:click={() => setOverviewMode('week')}
+      >
+        {t('overview.modeWeek')}
+      </button>
+      <button
+        type="button"
+        class="page-control-btn {overviewMode === 'date' ? 'page-control-btn-active' : ''}"
+        on:click={() => setOverviewMode('date')}
+      >
+        {t('overview.modeDate')}
+      </button>
 
-    {#if overviewMode === 'date'}
-      <div class="overview-date-bar">
-        <button
-          type="button"
-          class="page-control-btn-icon"
-          title={t('common.previous')}
-          on:click={() => stepOverviewDateBoundary('start', -1)}
-        >
-          <svg class="h-4 w-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M15 19l-7-7 7-7" />
-          </svg>
-        </button>
+      {#if overviewMode === 'date'}
+        <div class="overview-date-bar">
+          <button
+            type="button"
+            class="page-control-btn-icon"
+            title={t('common.previous')}
+            on:click={() => stepOverviewDateBoundary('start', -1)}
+          >
+            <svg class="h-4 w-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M15 19l-7-7 7-7" />
+            </svg>
+          </button>
 
-        <div class="overview-date-field">
-          <span class="overview-date-label">{t('overview.rangeStart')}</span>
-          <input
-            type="text"
-            bind:value={overviewDateInputFrom}
-            class="overview-date-input"
-            inputmode="numeric"
-            placeholder="YYYY/MM/DD"
-            spellcheck="false"
-            autocomplete="off"
-            on:focus={() => { editingOverviewDateFrom = true; }}
-            on:blur={() => commitOverviewDateInput('start')}
-            on:keydown={(event) => event.key === 'Enter' && commitOverviewDateInput('start')}
-          />
+          <div class="overview-date-field">
+            <span class="overview-date-label">{t('overview.rangeStart')}</span>
+            <input
+              type="text"
+              bind:value={overviewDateInputFrom}
+              class="overview-date-input"
+              inputmode="numeric"
+              placeholder="YYYY/MM/DD"
+              spellcheck="false"
+              autocomplete="off"
+              on:focus={() => { editingOverviewDateFrom = true; }}
+              on:blur={() => commitOverviewDateInput('start')}
+              on:keydown={(event) => event.key === 'Enter' && commitOverviewDateInput('start')}
+            />
+          </div>
+
+          <span class="overview-date-separator">-</span>
+
+          <div class="overview-date-field">
+            <span class="overview-date-label">{t('overview.rangeEnd')}</span>
+            <input
+              type="text"
+              bind:value={overviewDateInputTo}
+              class="overview-date-input"
+              inputmode="numeric"
+              placeholder="YYYY/MM/DD"
+              spellcheck="false"
+              autocomplete="off"
+              on:focus={() => { editingOverviewDateTo = true; }}
+              on:blur={() => commitOverviewDateInput('end')}
+              on:keydown={(event) => event.key === 'Enter' && commitOverviewDateInput('end')}
+            />
+          </div>
+
+          <button
+            type="button"
+            class="page-control-btn-icon"
+            title={t('common.next')}
+            on:click={() => stepOverviewDateBoundary('end', 1)}
+          >
+            <svg class="h-4 w-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9 5l7 7-7 7" />
+            </svg>
+          </button>
         </div>
+      {/if}
+    </div>
+  </section>
 
-        <span class="overview-date-separator">-</span>
-
-        <div class="overview-date-field">
-          <span class="overview-date-label">{t('overview.rangeEnd')}</span>
-          <input
-            type="text"
-            bind:value={overviewDateInputTo}
-            class="overview-date-input"
-            inputmode="numeric"
-            placeholder="YYYY/MM/DD"
-            spellcheck="false"
-            autocomplete="off"
-            on:focus={() => { editingOverviewDateTo = true; }}
-            on:blur={() => commitOverviewDateInput('end')}
-            on:keydown={(event) => event.key === 'Enter' && commitOverviewDateInput('end')}
-          />
-        </div>
-
-        <button
-          type="button"
-          class="page-control-btn-icon"
-          title={t('common.next')}
-          on:click={() => stepOverviewDateBoundary('end', 1)}
-        >
-          <svg class="h-4 w-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9 5l7 7-7 7" />
-          </svg>
-        </button>
-      </div>
-    {/if}
-  </div>
-
-  <!-- 统计卡片：始终渲染，内部切换骨架/真实数据 -->
   <div class="overview-summary-grid grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
     {#if loading || !stats}
       {#each [1,2,3,4] as _}
-        <div class="min-h-[116px] p-5 rounded-2xl bg-white dark:bg-slate-800/80 border border-slate-100 dark:border-slate-700/60 animate-pulse">
+        <div class="min-h-[116px] rounded-2xl border border-slate-100 bg-white p-5 animate-pulse dark:border-slate-700/60 dark:bg-slate-800/80">
           <div class="flex h-full items-center justify-between gap-4">
             <div class="flex-1">
-              <div class="h-3 bg-slate-200 dark:bg-slate-700 rounded w-20"></div>
-              <div class="h-8 bg-slate-200 dark:bg-slate-700 rounded w-1/2 mt-6"></div>
+              <div class="h-3 rounded bg-slate-200 dark:bg-slate-700 w-20"></div>
+              <div class="mt-6 h-8 w-1/2 rounded bg-slate-200 dark:bg-slate-700"></div>
             </div>
-            <div class="w-11 h-11 rounded-2xl bg-slate-100 dark:bg-slate-700 shrink-0"></div>
+            <div class="h-11 w-11 rounded-2xl bg-slate-100 dark:bg-slate-700 shrink-0"></div>
           </div>
         </div>
       {/each}
@@ -714,166 +715,165 @@
     </div>
   {/if}
 
-  <!-- 网站访问：始终渲染，加载中显示骨架，无数据显示占位文字 -->
   <div class="page-card overview-panel overview-panel-featured mb-4">
-    <h3 class="page-section-title">{t('overview.websiteVisits')}</h3>
-    {#if loading || !stats}
-      <div class="overview-browser-gallery grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 animate-pulse">
-        {#each [1,2] as _}
-          <div class="p-3.5 rounded-xl border border-slate-100 dark:border-slate-700">
-            <div class="h-4 bg-slate-200 dark:bg-slate-700 rounded w-3/4 mb-2.5"></div>
-            <div class="h-6 bg-slate-200 dark:bg-slate-700 rounded w-1/2 mb-1.5"></div>
-            <div class="h-3 bg-slate-100 dark:bg-slate-700/50 rounded w-2/3"></div>
-          </div>
-        {/each}
-      </div>
-    {:else if stats.browser_usage && stats.browser_usage.length > 0}
-      <div class="overview-browser-gallery grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-        {#each stats.browser_usage as browser}
-          <button
-            class="group overview-browser-card text-left p-3.5 rounded-xl border border-slate-100 dark:border-slate-700
-                   bg-white dark:bg-slate-800/60
-                   hover:border-slate-200 dark:hover:border-slate-600 hover:shadow-sm
-                   transition-all duration-200"
-            on:click={() => {
-              selectedBrowser = browser;
-              cancelDomainSemanticEdit();
-            }}
-          >
-            <div class="flex items-center gap-2 mb-1.5">
-              {#if getAppIconSrc(browser.browser_name, browser.executable_path)}
-                <img src={getAppIconSrc(browser.browser_name, browser.executable_path)} alt="" class="w-6 h-6 rounded-md object-cover" />
-              {:else}
-                <span class="text-xl">🌐</span>
-              {/if}
-              <span class="font-medium text-slate-700 dark:text-slate-200 truncate">{browser.browser_name}</span>
-            </div>
-            <div class="text-lg font-bold text-slate-800 dark:text-white mb-1">
-              {formatDuration(browser.duration)}
-            </div>
-            <div class="flex items-center gap-2 text-xs text-slate-400">
-              <span>{t('overview.sitesCount', { count: browser.domains.length })}</span>
-              <span>·</span>
-              <span>{t('overview.pagesCount', { count: browser.domains.reduce((sum, d) => sum + d.urls.length, 0) })}</span>
-            </div>
-          </button>
-        {/each}
-      </div>
-    {:else}
-      <div class="empty-state-compact">
-        <div class="empty-state-icon !w-12 !h-12 !mb-3 shadow-none">
-          <span class="text-xl">🌐</span>
-        </div>
-        <p class="empty-state-copy">{overviewNoWebsiteVisitsText}</p>
-      </div>
-    {/if}
-  </div>
-
-  <div class="overview-section-grid">
-  <!-- 应用使用：始终渲染 -->
-  <div class="page-card overview-panel overview-panel-subtle mb-4">
-    <div class="mb-3 flex items-center justify-between gap-3">
-      <h3 class="page-section-title !mb-0">{t('overview.appUsage')}</h3>
-      <button
-        type="button"
-        class="page-control-btn-icon"
-        title={appUsageViewModeLabel}
-        on:click={() => {
-          appUsageViewMode = appUsageViewMode === 'row' ? 'column' : 'row';
-        }}
-      >
-        {#if appUsageViewMode === 'row'}
-          <svg class="h-4 w-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 7h16M4 12h12M4 17h8" />
-          </svg>
-        {:else}
-          <svg class="h-4 w-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M6 18V9m6 9V6m6 12v-4" />
-          </svg>
-        {/if}
-      </button>
-    </div>
-    {#if loading || !stats}
-      <div class="animate-pulse">
-        {#each [1,2,3,4] as _}
-          <div class="flex items-center gap-3 mb-3">
-            <div class="w-7 h-7 rounded bg-slate-200 dark:bg-slate-700 flex-shrink-0"></div>
-            <div class="flex-1 h-3 bg-slate-200 dark:bg-slate-700 rounded"></div>
-            <div class="w-16 h-3 bg-slate-100 dark:bg-slate-700/50 rounded"></div>
-          </div>
-        {/each}
-      </div>
-    {:else if stats.app_usage.length > 0}
-      <AppUsageChart data={stats.app_usage} mode={appUsageViewMode} />
-    {:else}
-      <div class="empty-state-compact">
-        <div class="empty-state-icon !w-12 !h-12 !mb-3 shadow-none">
-          <span class="text-xl">📊</span>
-        </div>
-        <p class="empty-state-copy">{overviewNoAppStatsText}</p>
-      </div>
-    {/if}
-  </div>
-
-  <div class="page-card overview-panel overview-panel-subtle mb-4">
-    <div class="mb-3 flex items-center justify-between gap-3">
-      <h3 class="page-section-title !mb-0">{t('overview.hourlyActivity')}</h3>
-      <button
-        type="button"
-        class="page-control-btn-icon"
-        title={hourlyActivityViewModeLabel}
-        on:click={() => {
-          hourlyActivityViewMode = hourlyActivityViewMode === 'column' ? 'row' : 'column';
-        }}
-      >
-        {#if hourlyActivityViewMode === 'column'}
-          <svg class="h-4 w-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M6 18V9m6 9V6m6 12v-4" />
-          </svg>
-        {:else}
-          <svg class="h-4 w-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 7h16M4 12h12M4 17h8" />
-          </svg>
-        {/if}
-      </button>
-    </div>
-    {#if loading || !stats}
-      <div class="animate-pulse rounded-2xl bg-white dark:bg-slate-800/60">
-        <div class="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-          {#each [1,2,3,4] as _}
-            <div class="min-h-[88px] rounded-2xl border border-slate-100 dark:border-slate-700/60 p-4">
-              <div class="h-3 w-16 rounded bg-slate-200 dark:bg-slate-700"></div>
-              <div class="mt-4 h-7 w-20 rounded bg-slate-200 dark:bg-slate-700"></div>
+      <h3 class="page-section-title">{t('overview.websiteVisits')}</h3>
+      {#if loading || !stats}
+        <div class="overview-browser-gallery grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 animate-pulse">
+          {#each [1,2] as _}
+            <div class="p-3.5 rounded-xl border border-slate-100 dark:border-slate-700">
+              <div class="h-4 bg-slate-200 dark:bg-slate-700 rounded w-3/4 mb-2.5"></div>
+              <div class="h-6 bg-slate-200 dark:bg-slate-700 rounded w-1/2 mb-1.5"></div>
+              <div class="h-3 bg-slate-100 dark:bg-slate-700/50 rounded w-2/3"></div>
             </div>
           {/each}
         </div>
-        <div class="rounded-2xl border border-slate-100 dark:border-slate-700/60 p-4">
-          <div class="flex h-40 items-end gap-1.5">
-            {#each Array(24) as _, hour}
-              <div class="flex h-full flex-1 flex-col items-center justify-end">
-                <div
-                  class="w-full rounded-t-lg bg-slate-200 dark:bg-slate-700"
-                  style={`height: ${Math.max(((hour % 6) + 2) * 12, 18)}%; opacity: 0.8;`}
-                ></div>
-                <div class="mt-2 h-2 w-7 rounded bg-slate-100 dark:bg-slate-700/60"></div>
+      {:else if stats.browser_usage && stats.browser_usage.length > 0}
+        <div class="overview-browser-gallery grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+          {#each stats.browser_usage as browser}
+            <button
+              class="group overview-browser-card text-left p-3.5 rounded-xl border border-slate-100 dark:border-slate-700
+                     bg-white dark:bg-slate-800/60
+                     hover:border-slate-200 dark:hover:border-slate-600 hover:shadow-sm
+                     transition-all duration-200"
+              on:click={() => {
+                selectedBrowser = browser;
+                cancelDomainSemanticEdit();
+              }}
+            >
+              <div class="flex items-center gap-2 mb-1.5">
+                {#if getAppIconSrc(browser.browser_name, browser.executable_path)}
+                  <img src={getAppIconSrc(browser.browser_name, browser.executable_path)} alt="" class="w-6 h-6 rounded-md object-cover" />
+                {:else}
+                  <span class="text-xl">🌐</span>
+                {/if}
+                <span class="font-medium text-slate-700 dark:text-slate-200 truncate">{browser.browser_name}</span>
+              </div>
+              <div class="text-lg font-bold text-slate-800 dark:text-white mb-1">
+                {formatDuration(browser.duration)}
+              </div>
+              <div class="flex items-center gap-2 text-xs text-slate-400">
+                <span>{t('overview.sitesCount', { count: browser.domains.length })}</span>
+                <span>·</span>
+                <span>{t('overview.pagesCount', { count: browser.domains.reduce((sum, d) => sum + d.urls.length, 0) })}</span>
+              </div>
+            </button>
+          {/each}
+        </div>
+      {:else}
+        <div class="empty-state-compact">
+          <div class="empty-state-icon !w-12 !h-12 !mb-3 shadow-none">
+            <span class="text-xl">🌐</span>
+          </div>
+          <p class="empty-state-copy">{overviewNoWebsiteVisitsText}</p>
+        </div>
+      {/if}
+  </div>
+
+  <div class="overview-section-grid">
+    <section class="page-card overview-section-card overview-panel overview-panel-subtle">
+      <div class="mb-3 flex items-center justify-between gap-3">
+        <h3 class="page-section-title !mb-0">{t('overview.appUsage')}</h3>
+        <button
+          type="button"
+          class="page-control-btn-icon"
+          title={appUsageViewModeLabel}
+          on:click={() => {
+            appUsageViewMode = appUsageViewMode === 'row' ? 'column' : 'row';
+          }}
+        >
+          {#if appUsageViewMode === 'row'}
+            <svg class="h-4 w-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 7h16M4 12h12M4 17h8" />
+            </svg>
+          {:else}
+            <svg class="h-4 w-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M6 18V9m6 9V6m6 12v-4" />
+            </svg>
+          {/if}
+        </button>
+      </div>
+      {#if loading || !stats}
+        <div class="animate-pulse">
+          {#each [1,2,3,4] as _}
+            <div class="mb-3 flex items-center gap-3">
+              <div class="h-7 w-7 rounded bg-slate-200 dark:bg-slate-700 flex-shrink-0"></div>
+              <div class="h-3 flex-1 rounded bg-slate-200 dark:bg-slate-700"></div>
+              <div class="h-3 w-16 rounded bg-slate-100 dark:bg-slate-700/50"></div>
+            </div>
+          {/each}
+        </div>
+      {:else if stats.app_usage.length > 0}
+        <AppUsageChart data={stats.app_usage} mode={appUsageViewMode} embedded />
+      {:else}
+        <div class="empty-state-compact">
+          <div class="empty-state-icon !w-12 !h-12 !mb-3 shadow-none">
+            <span class="text-xl">📊</span>
+          </div>
+          <p class="empty-state-copy">{overviewNoAppStatsText}</p>
+        </div>
+      {/if}
+    </section>
+
+    <section class="page-card overview-section-card overview-panel overview-panel-subtle">
+      <div class="mb-3 flex items-center justify-between gap-3">
+        <h3 class="page-section-title !mb-0">{t('overview.hourlyActivity')}</h3>
+        <button
+          type="button"
+          class="page-control-btn-icon"
+          title={hourlyActivityViewModeLabel}
+          on:click={() => {
+            hourlyActivityViewMode = hourlyActivityViewMode === 'column' ? 'row' : 'column';
+          }}
+        >
+          {#if hourlyActivityViewMode === 'column'}
+            <svg class="h-4 w-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M6 18V9m6 9V6m6 12v-4" />
+            </svg>
+          {:else}
+            <svg class="h-4 w-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 7h16M4 12h12M4 17h8" />
+            </svg>
+          {/if}
+        </button>
+      </div>
+      {#if loading || !stats}
+        <div class="animate-pulse">
+          <div class="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+            {#each [1,2,3,4] as _}
+              <div class="min-h-[88px] rounded-[22px] bg-slate-50/88 p-4 dark:bg-slate-900/30">
+                <div class="h-3 w-16 rounded bg-slate-200 dark:bg-slate-700"></div>
+                <div class="mt-4 h-7 w-20 rounded bg-slate-200 dark:bg-slate-700"></div>
               </div>
             {/each}
           </div>
+          <div class="rounded-[22px] bg-slate-50/90 p-4 dark:bg-slate-900/40">
+            <div class="flex h-40 items-end gap-1.5">
+              {#each Array(24) as _, hour}
+                <div class="flex h-full flex-1 flex-col items-center justify-end">
+                  <div
+                    class="w-full rounded-t-lg bg-slate-200 dark:bg-slate-700"
+                    style={`height: ${Math.max(((hour % 6) + 2) * 12, 18)}%; opacity: 0.8;`}
+                  ></div>
+                  <div class="mt-2 h-2 w-7 rounded bg-slate-100 dark:bg-slate-700/60"></div>
+                </div>
+              {/each}
+            </div>
+          </div>
         </div>
-      </div>
-    {:else}
-      <ActivityHourlyChart
-        data={stats.hourly_activity_distribution}
-        peakHourLabel={hourlyChartPeakHourLabel}
-        peakDurationLabel={hourlyChartPeakDurationLabel}
-        distributionTitle={hourlyChartDistributionTitle}
-        distributionSubtitleKey={hourlyChartDistributionSubtitleKey}
-        mode={hourlyActivityViewMode}
-      />
-    {/if}
+      {:else}
+        <ActivityHourlyChart
+          embedded
+          data={stats.hourly_activity_distribution}
+          peakHourLabel={hourlyChartPeakHourLabel}
+          peakDurationLabel={hourlyChartPeakDurationLabel}
+          distributionTitle={hourlyChartDistributionTitle}
+          distributionSubtitleKey={hourlyChartDistributionSubtitleKey}
+          mode={hourlyActivityViewMode}
+        />
+      {/if}
+    </section>
   </div>
   </div>
-</div>
 </div>
 
 <!-- 浏览器详情弹窗 -->

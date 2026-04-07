@@ -1191,11 +1191,13 @@ fn linux_virtual_origin(
             .as_ref()
             .and_then(|rects| virtual_origin_from_rects(rects)),
         LinuxDesktopSession::Wayland if desktop_environment == LinuxDesktopEnvironment::Gnome => {
-            run_gnome_display_config_positions().as_ref().and_then(|positions| {
-                let min_x = positions.iter().map(|(x, _)| *x).min()?;
-                let min_y = positions.iter().map(|(_, y)| *y).min()?;
-                Some((min_x, min_y))
-            })
+            run_gnome_display_config_positions()
+                .as_ref()
+                .and_then(|positions| {
+                    let min_x = positions.iter().map(|(x, _)| *x).min()?;
+                    let min_y = positions.iter().map(|(_, y)| *y).min()?;
+                    Some((min_x, min_y))
+                })
         }
         _ => None,
     }
@@ -1210,9 +1212,11 @@ fn linux_capture_target_rect(
 
     if session == LinuxDesktopSession::X11 {
         let center = capture_target_point(active_window)?;
-        if let Some(monitor_rect) = run_xrandr_active_monitors()
-            .and_then(|rects| rects.into_iter().find(|rect| rect_contains_point(*rect, center)))
-        {
+        if let Some(monitor_rect) = run_xrandr_active_monitors().and_then(|rects| {
+            rects
+                .into_iter()
+                .find(|rect| rect_contains_point(*rect, center))
+        }) {
             return Some(monitor_rect);
         }
     }
@@ -1262,14 +1266,10 @@ fn crop_linux_capture_to_rect(
 
     let image = image::open(temp_png)
         .map_err(|e| AppError::Screenshot(format!("读取 Linux 截图失败: {e}")))?;
-    let virtual_origin =
-        linux_virtual_origin(session, desktop_environment).unwrap_or((0, 0));
-    let Some((crop_x, crop_y, crop_width, crop_height)) = normalize_linux_crop_rect(
-        virtual_origin,
-        target_rect,
-        image.width(),
-        image.height(),
-    ) else {
+    let virtual_origin = linux_virtual_origin(session, desktop_environment).unwrap_or((0, 0));
+    let Some((crop_x, crop_y, crop_width, crop_height)) =
+        normalize_linux_crop_rect(virtual_origin, target_rect, image.width(), image.height())
+    else {
         return Ok(());
     };
 

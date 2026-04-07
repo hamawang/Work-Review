@@ -275,7 +275,7 @@
         {#if activeTab === 'general'}
           <SettingsGeneral bind:config on:change={() => {}} />
         {:else if activeTab === 'ai'}
-          <div class="page-card">
+          <div class="settings-card settings-ai-shell">
             <h3 class="settings-card-title">{t('settings.aiCardTitle')}</h3>
             <p class="settings-card-desc">{t('settings.aiCardDescription')}</p>
             <SettingsAI bind:config {providers} on:change={() => {}} />

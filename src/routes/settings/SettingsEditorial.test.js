@@ -13,7 +13,9 @@ test('设置页应接入编辑部风格壳层并强化保存操作区', async ()
   assert.match(settingsSource, /settings-stage-layout/);
   assert.match(settingsSource, /settings-tab-rail/);
   assert.match(settingsSource, /settings-stage-shell/);
+  assert.match(settingsSource, /settings-ai-shell/);
   assert.match(settingsSource, /settings-save-dock/);
+  assert.doesNotMatch(settingsSource, /<div class="page-card">[\s\S]*<SettingsAI/);
   assert.doesNotMatch(settingsSource, /settings-summary-grid/);
   assert.doesNotMatch(settingsSource, /settings-summary-toolbar/);
   assert.doesNotMatch(settingsSource, /settings-summary-manager/);
@@ -27,6 +29,7 @@ test('设置页应接入编辑部风格壳层并强化保存操作区', async ()
   assert.match(appCssSource, /\.settings-stage-layout/);
   assert.match(appCssSource, /\.settings-tab-rail/);
   assert.match(appCssSource, /\.settings-stage-shell/);
+  assert.match(appCssSource, /\.settings-ai-shell/);
   assert.match(appCssSource, /\.settings-save-dock/);
   assert.doesNotMatch(appCssSource, /\.settings-summary-grid/);
   assert.doesNotMatch(appCssSource, /\.settings-summary-toolbar/);

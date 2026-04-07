@@ -287,7 +287,7 @@
   });
 </script>
 
-<div class="page-shell" data-locale={currentLocale}>
+<div class="page-shell report-editorial-shell" data-locale={currentLocale}>
   <!-- 页面标题 -->
   <div class="report-hero">
     <div class="report-hero-main">
@@ -379,8 +379,9 @@
     </div>
   </div>
 
+  <div class="report-editorial-stack">
   {#if config}
-    <div class="page-card">
+    <div class="page-card report-sheet report-sheet-controls">
       <h3 class="settings-card-title">{t('report.generationOptions')}</h3>
       {#if config.ai_mode === 'summary'}
         <div class="space-y-3">
@@ -450,14 +451,14 @@
         </button>
       </div>
     {/if}
-    <div class="page-card">
-      <div class="text-xs text-slate-400 mb-4 flex items-center gap-2">
+    <div class="page-card report-sheet report-article-card">
+      <div class="report-sheet-meta text-xs text-slate-400 mb-4 flex items-center gap-2">
         <div class="w-1.5 h-1.5 rounded-full {isYesterdayReport ? 'bg-amber-500' : 'bg-emerald-500'}"></div>
         {isYesterdayReport ? t('report.yesterdayPrefix') : ''}{t('report.generatedAt', { time: formatLocalizedDate(new Date(report.created_at * 1000), { year: 'numeric', month: '2-digit', day: '2-digit' }) + ' ' + formatLocalizedTime(new Date(report.created_at * 1000), { hour: '2-digit', minute: '2-digit', second: '2-digit' }) })}
       </div>
       <div
         use:interceptReportLinks
-        class="markdown-body prose prose-slate dark:prose-invert max-w-none"
+        class="markdown-body report-sheet-body prose prose-slate dark:prose-invert max-w-none"
       >
         {@html renderMarkdown(report.content)}
       </div>
@@ -489,6 +490,7 @@
       </button>
     </div>
   {/if}
+</div>
 </div>
 
 <!-- 表格 / 标题 / 列表等 markdown 样式已统一放到 app.css .markdown-body -->

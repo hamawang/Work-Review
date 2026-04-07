@@ -7,6 +7,7 @@
 
   export let data = [];
   export let mode = 'row';
+  export let embedded = false;
 
   // 订阅全局图标缓存
   let appIcons = {};
@@ -45,12 +46,18 @@
   $: displayApps = expanded ? data : data.slice(0, DEFAULT_COUNT);
   $: hasMore = data.length > DEFAULT_COUNT;
   $: maxDuration = displayApps.length > 0 ? Math.max(...displayApps.map(a => a.duration)) : 1;
+  $: columnShellClass = embedded
+    ? 'app-usage-chart__columns app-usage-chart__columns-embedded'
+    : 'app-usage-chart__columns rounded-2xl border border-slate-100 bg-white/90 p-4 dark:border-slate-700/60 dark:bg-slate-800/70';
+  $: plotClass = embedded
+    ? 'app-usage-chart__plot relative rounded-[22px] bg-slate-50/90 px-3 pb-3 pt-4 dark:bg-slate-900/40'
+    : 'app-usage-chart__plot relative rounded-2xl bg-slate-50 px-3 pb-3 pt-4 dark:bg-slate-900/40';
 </script>
 
 <div class="space-y-2" data-locale={currentLocale}>
   {#if mode === 'column'}
-    <div class="app-usage-chart__columns rounded-2xl border border-slate-100 bg-white/90 p-4 dark:border-slate-700/60 dark:bg-slate-800/70">
-      <div class="app-usage-chart__plot relative rounded-2xl bg-slate-50 px-3 pb-3 pt-4 dark:bg-slate-900/40">
+    <div class={columnShellClass}>
+      <div class={plotClass}>
         <div class="pointer-events-none absolute inset-x-3 top-4 bottom-14">
           <div class="absolute inset-x-0 top-0 border-t border-dashed border-slate-200 dark:border-slate-700/80"></div>
           <div class="absolute inset-x-0 top-1/2 border-t border-dashed border-slate-200 dark:border-slate-700/80"></div>

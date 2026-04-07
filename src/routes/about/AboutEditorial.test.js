@@ -22,6 +22,7 @@ test('关于页应接入编辑部风格壳层与信息分组', async () => {
   assert.match(appCssSource, /\.about-brand-card/);
   assert.match(appCssSource, /\.about-action-strip/);
   assert.match(appCssSource, /\.about-trust-grid/);
+  assert.match(appCssSource, /\.about-trust-card[\s\S]*text-align:\s*center;/);
   assert.match(appCssSource, /\.about-tech-stack/);
   assert.match(appCssSource, /\.about-tech-pill/);
   assert.doesNotMatch(appCssSource, /\.about-system-note/);

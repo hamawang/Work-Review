@@ -137,31 +137,44 @@
   background: var(--editorial-shell-bg);
 }
 
+.app-shell-stage {
+  position: relative;
+  align-items: stretch;
+  padding: 0.35rem;
+  border-radius: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.app-shell-sidebar-frame,
+.app-shell-main-frame {
+  min-width: 0;
+  min-height: 0;
+  padding: 0.2rem;
+  border-radius: 2.1rem;
+  background: rgba(255, 255, 255, 0.34);
+  border: 1px solid rgba(255, 255, 255, 0.42);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.6),
+    0 10px 24px rgba(15, 23, 42, 0.04);
+}
+
 .app-shell-sidebar {
   position: relative;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(248, 250, 252, 0.66));
-  border-right: 1px solid rgba(255, 255, 255, 0.56);
-  box-shadow: 18px 0 44px rgba(15, 23, 42, 0.05);
-  backdrop-filter: blur(24px);
+  border-radius: 1.9rem;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
 }
 
 .app-shell-main {
   position: relative;
-}
-
-.app-shell-main::before {
-  content: '';
-  position: absolute;
-  inset: 0.75rem 0.9rem 0.9rem 0.25rem;
   border-radius: 2rem;
-  border: 1px solid rgba(255, 255, 255, 0.56);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0.22));
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.62),
-    0 18px 36px rgba(148, 163, 184, 0.07);
-  pointer-events: none;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
 }
 
 .app-shell-main-scroll {
@@ -171,16 +184,6 @@
 
 .app-shell-windowbar {
   cursor: default;
-}
-
-.app-shell-windowbar::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.62), rgba(255, 255, 255, 0));
-  border-bottom: 1px solid rgba(255, 255, 255, 0.36);
-  pointer-events: none;
 }
 
 .app-shell-window-controls {
@@ -234,26 +237,29 @@
   color: #ffffff;
 }
 
-.dark .app-shell-sidebar {
-  background:
-    linear-gradient(180deg, rgba(2, 6, 23, 0.7), rgba(15, 23, 42, 0.72));
-  border-right-color: rgba(71, 85, 105, 0.42);
-  box-shadow: 18px 0 44px rgba(2, 6, 23, 0.34);
+.dark .app-shell-stage {
+  background: transparent;
+  border: none;
+  box-shadow: none;
 }
 
-.dark .app-shell-main::before {
-  border-color: rgba(71, 85, 105, 0.32);
-  background:
-    linear-gradient(180deg, rgba(15, 23, 42, 0.32), rgba(15, 23, 42, 0.18));
+.dark .app-shell-sidebar-frame,
+.dark .app-shell-main-frame {
+  background: rgba(15, 23, 42, 0.32);
+  border-color: rgba(71, 85, 105, 0.28);
   box-shadow:
     inset 0 1px 0 rgba(148, 163, 184, 0.06),
-    0 24px 44px rgba(2, 6, 23, 0.28);
+    0 12px 28px rgba(2, 6, 23, 0.16);
 }
 
-.dark .app-shell-windowbar::before {
-  background:
-    linear-gradient(180deg, rgba(15, 23, 42, 0.7), rgba(15, 23, 42, 0));
-  border-bottom-color: rgba(71, 85, 105, 0.26);
+.dark .app-shell-sidebar {
+  background: transparent;
+  box-shadow: none;
+}
+
+.dark .app-shell-main {
+  background: transparent;
+  box-shadow: none;
 }
 
 .dark .app-shell-window-controls {
@@ -612,7 +618,7 @@
 }
 
 .sidebar-top {
-  @apply px-3 pt-0.5 pb-3 space-y-2.5;
+  @apply px-3 pt-0 pb-3 space-y-2.5;
 }
 
 .sidebar-brand {
@@ -1147,29 +1153,15 @@
 
 .sidebar-editorial-shell {
   position: relative;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(248, 250, 252, 0.66));
-}
-
-.sidebar-editorial-shell::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background:
-    radial-gradient(circle at top left, rgba(99, 102, 241, 0.08), transparent 42%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.18), transparent 28%);
-  pointer-events: none;
+  background: transparent;
 }
 
 .sidebar-brand-panel {
-  @apply rounded-[26px] px-3;
-  min-height: 78px;
-  background:
-    radial-gradient(circle at top left, rgba(255, 255, 255, 0.96), rgba(245, 247, 255, 0.92) 46%, rgba(255, 252, 244, 0.9) 100%);
-  border: 1px solid rgba(255, 255, 255, 0.72);
-  box-shadow:
-    0 18px 36px rgba(15, 23, 42, 0.06),
-    inset 0 1px 0 rgba(255, 255, 255, 0.82);
+  @apply rounded-none px-0;
+  min-height: 72px;
+  background: transparent;
+  border: none;
+  box-shadow: none;
 }
 
 .sidebar-brand-row {
@@ -1177,17 +1169,15 @@
 }
 
 .sidebar-status-panel {
-  border-color: rgba(255, 255, 255, 0.76);
-  box-shadow:
-    0 14px 30px rgba(15, 23, 42, 0.05),
-    inset 0 1px 0 rgba(255, 255, 255, 0.78);
+  background: transparent;
+  border: none;
+  box-shadow: none;
 }
 
 .sidebar-nav-section {
-  @apply rounded-[28px] px-2 py-2;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.36), rgba(255, 255, 255, 0.08));
-  border: 1px solid rgba(255, 255, 255, 0.42);
+  @apply rounded-none px-0 py-0;
+  background: transparent;
+  border: none;
 }
 
 .sidebar-nav-item {
@@ -1222,23 +1212,29 @@
 }
 
 .sidebar-toolbelt {
-  @apply rounded-[22px] px-2;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.44), rgba(255, 255, 255, 0.12));
-  border: 1px solid rgba(255, 255, 255, 0.42);
+  @apply rounded-none px-0;
+  background: transparent;
+  border: none;
 }
 
 .overview-editorial-shell {
   position: relative;
 }
 
-.overview-command-deck {
-  @apply rounded-[28px] px-4 py-3;
+.overview-lead-card {
+  position: relative;
+  overflow: hidden;
   background: var(--editorial-surface-featured);
-  border: 1px solid rgba(255, 255, 255, 0.72);
-  box-shadow:
-    0 20px 44px rgba(15, 23, 42, 0.06),
-    inset 0 1px 0 rgba(255, 255, 255, 0.82);
+}
+
+.overview-command-deck {
+  @apply flex flex-wrap items-center gap-2;
+  margin-bottom: 1rem;
+  padding: 0 0 1rem;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.78);
+  box-shadow: none;
 }
 
 .overview-summary-grid {
@@ -1283,6 +1279,10 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1rem;
+}
+
+.overview-section-card {
+  background: var(--editorial-surface-subtle);
 }
 
 .overview-browser-dialog {
@@ -1459,6 +1459,12 @@
   gap: 1rem;
 }
 
+.settings-ai-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
 .settings-save-dock {
   @apply rounded-[22px] p-1.5;
   background:
@@ -1576,6 +1582,7 @@
 
 .about-trust-card {
   padding: 1.25rem 1.3rem;
+  text-align: center;
   background: var(--editorial-surface-subtle);
 }
 
@@ -1812,33 +1819,23 @@
 }
 
 .dark .sidebar-editorial-shell {
-  background:
-    linear-gradient(180deg, rgba(2, 6, 23, 0.72), rgba(15, 23, 42, 0.7));
-}
-
-.dark .sidebar-editorial-shell::before {
-  background:
-    radial-gradient(circle at top left, rgba(99, 102, 241, 0.1), transparent 42%),
-    linear-gradient(180deg, rgba(148, 163, 184, 0.04), transparent 28%);
+  background: transparent;
 }
 
 .dark .sidebar-brand-panel {
-  background:
-    radial-gradient(circle at top left, rgba(79, 70, 229, 0.16), rgba(30, 41, 59, 0.94) 48%, rgba(15, 23, 42, 0.96) 100%);
-  border-color: rgba(71, 85, 105, 0.54);
+  background: transparent;
+  border: none;
 }
 
 .dark .sidebar-status-panel {
-  border-color: rgba(71, 85, 105, 0.46);
-  box-shadow:
-    0 16px 34px rgba(2, 6, 23, 0.24),
-    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  background: transparent;
+  border: none;
+  box-shadow: none;
 }
 
 .dark .sidebar-nav-section {
-  background:
-    linear-gradient(180deg, rgba(30, 41, 59, 0.5), rgba(15, 23, 42, 0.22));
-  border-color: rgba(71, 85, 105, 0.34);
+  background: transparent;
+  border: none;
 }
 
 .dark .sidebar-nav-item-active {
@@ -1847,15 +1844,15 @@
 }
 
 .dark .sidebar-toolbelt {
-  background:
-    linear-gradient(180deg, rgba(30, 41, 59, 0.44), rgba(15, 23, 42, 0.14));
-  border-color: rgba(71, 85, 105, 0.34);
+  background: transparent;
+  border: none;
 }
 
 .dark .sidebar-brand-line {
   color: #c4b5fd;
 }
 
+.dark .overview-lead-card,
 .dark .overview-command-deck,
 .dark .overview-panel-featured,
 .dark .overview-panel-subtle,
@@ -1869,7 +1866,8 @@
 }
 
 .dark .overview-command-deck {
-  background: var(--editorial-surface-featured);
+  background: transparent;
+  border-bottom-color: rgba(71, 85, 105, 0.72);
 }
 
 .dark .overview-panel-featured {
@@ -1878,6 +1876,10 @@
 
 .dark .overview-panel-subtle,
 .dark .overview-browser-card {
+  background: var(--editorial-surface-subtle);
+}
+
+.dark .overview-section-card {
   background: var(--editorial-surface-subtle);
 }
 

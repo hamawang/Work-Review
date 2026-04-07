@@ -7,6 +7,7 @@
   export let mode = 'column';
   export let peakHourLabel = '';
   export let peakDurationLabel = '';
+  export let embedded = false;
 
   const keyHours = [0, 6, 12, 18, 23];
   let selectedHour = null;
@@ -83,29 +84,35 @@
     return candidates.find((candidate) => candidate >= raw) || Math.ceil(raw / 3600) * 3600;
   })();
   $: yAxisTicks = [axisMax, Math.round(axisMax * 2 / 3), Math.round(axisMax / 3), 0];
+  $: summaryCardClass = embedded
+    ? 'min-h-[96px] rounded-[22px] bg-slate-50/90 p-4 dark:bg-slate-900/30'
+    : 'min-h-[104px] rounded-2xl border border-slate-100 bg-white p-4 dark:border-slate-700/60 dark:bg-slate-800/80';
+  $: chartShellClass = embedded
+    ? 'rounded-[24px] bg-transparent p-0'
+    : 'rounded-2xl border border-slate-100 bg-white p-4 dark:border-slate-700/60 dark:bg-slate-800/80';
 </script>
 
 <div class="space-y-4" data-locale={currentLocale}>
   <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
-    <div class="min-h-[104px] rounded-2xl border border-slate-100 bg-white p-4 dark:border-slate-700/60 dark:bg-slate-800/80">
+    <div class={summaryCardClass}>
       <p class="text-[13px] font-medium text-slate-400 dark:text-slate-500">{peakHourLabel || t('hourlyChart.peakHour')}</p>
       <p class="mt-5 text-[1.8rem] font-semibold tracking-tight text-slate-800 dark:text-white">
         {formatHourLabel(peakBucket.hour)}
       </p>
     </div>
-    <div class="min-h-[104px] rounded-2xl border border-slate-100 bg-white p-4 dark:border-slate-700/60 dark:bg-slate-800/80">
+    <div class={summaryCardClass}>
       <p class="text-[13px] font-medium text-slate-400 dark:text-slate-500">{peakDurationLabel || t('hourlyChart.peakDuration')}</p>
       <p class="mt-5 text-[1.8rem] font-semibold tracking-tight text-slate-800 dark:text-white">
         {formatDurationLocalized(peakBucket.duration, { compact: true })}
       </p>
     </div>
-    <div class="min-h-[104px] rounded-2xl border border-slate-100 bg-white p-4 dark:border-slate-700/60 dark:bg-slate-800/80">
+    <div class={summaryCardClass}>
       <p class="text-[13px] font-medium text-slate-400 dark:text-slate-500">{t('hourlyChart.activeHours')}</p>
       <p class="mt-5 text-[1.8rem] font-semibold tracking-tight text-slate-800 dark:text-white">
         {activeBuckets.length}
       </p>
     </div>
-    <div class="min-h-[104px] rounded-2xl border border-slate-100 bg-white p-4 dark:border-slate-700/60 dark:bg-slate-800/80">
+    <div class={summaryCardClass}>
       <p class="text-[13px] font-medium text-slate-400 dark:text-slate-500">{t('hourlyChart.totalDuration')}</p>
       <p class="mt-5 text-[1.8rem] font-semibold tracking-tight text-slate-800 dark:text-white">
         {formatDurationLocalized(totalDuration, { compact: true })}
@@ -113,7 +120,7 @@
     </div>
   </div>
 
-  <div class="rounded-2xl border border-slate-100 bg-white p-4 dark:border-slate-700/60 dark:bg-slate-800/80">
+  <div class={chartShellClass}>
     <div class="mb-4 flex items-center justify-between gap-3">
       <div>
         <p class="text-sm font-semibold text-slate-700 dark:text-slate-200">

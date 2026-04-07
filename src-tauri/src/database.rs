@@ -1159,7 +1159,13 @@ impl Database {
             ));
             entry.0.duration += day_duration;
             entry.0.count += 1;
-            if timestamp >= entry.1 {
+            if executable_path
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .is_some()
+                && timestamp >= entry.1
+            {
                 entry.0.executable_path = executable_path.clone();
                 entry.1 = timestamp;
             }
@@ -1172,9 +1178,21 @@ impl Database {
                 *browser_duration_map
                     .entry(normalized_browser_name.clone())
                     .or_insert(0) += day_duration;
-                browser_path_map
-                    .entry(normalized_browser_name.clone())
-                    .or_insert((executable_path.clone(), timestamp));
+                {
+                    let browser_entry = browser_path_map
+                        .entry(normalized_browser_name.clone())
+                        .or_insert((None, 0));
+                    if executable_path
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .is_some()
+                        && timestamp >= browser_entry.1
+                    {
+                        browser_entry.0 = executable_path.clone();
+                        browser_entry.1 = timestamp;
+                    }
+                }
 
                 let page_hint = browser_url
                     .as_deref()
@@ -2411,6 +2429,65 @@ mod tests {
                     bucket.duration == 0
                 }
             }));
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn 今日统计聚合同名应用时应保留最近可用的执行路径() {
+        let db_path = temp_db_path("daily-stats-keep-latest-non-empty-path");
+        let db = Database::new(&db_path).expect("创建测试数据库失败");
+        let date = "2026-03-27";
+
+        let records = vec![
+            Activity {
+                id: None,
+                timestamp: local_ts(date, 10, 0),
+                app_name: "mail".to_string(),
+                window_title: "Inbox".to_string(),
+                screenshot_path: "mail-a.jpg".to_string(),
+                ocr_text: None,
+                category: "office".to_string(),
+                duration: 10 * 60,
+                browser_url: None,
+                executable_path: Some("/Applications/Mail.app/Contents/MacOS/Mail".to_string()),
+                semantic_category: None,
+                semantic_confidence: None,
+            },
+            Activity {
+                id: None,
+                timestamp: local_ts(date, 10, 15),
+                app_name: "邮件".to_string(),
+                window_title: "Draft".to_string(),
+                screenshot_path: "mail-b.jpg".to_string(),
+                ocr_text: None,
+                category: "office".to_string(),
+                duration: 5 * 60,
+                browser_url: None,
+                executable_path: None,
+                semantic_category: None,
+                semantic_confidence: None,
+            },
+        ];
+
+        for activity in &records {
+            db.insert_activity(activity).expect("插入测试数据失败");
+        }
+
+        let stats = db
+            .get_daily_stats_with_work_time(date, 9, 18, 0, 0)
+            .expect("读取今日统计失败");
+
+        let mail = stats
+            .app_usage
+            .iter()
+            .find(|item| item.app_name == "Mail")
+            .expect("未找到 Mail 聚合结果");
+
+        assert_eq!(
+            mail.executable_path.as_deref(),
+            Some("/Applications/Mail.app/Contents/MacOS/Mail")
+        );
 
         let _ = std::fs::remove_file(db_path);
     }

@@ -584,15 +584,14 @@
       <p class="empty-state-copy">{t('timeline.empty')}</p>
     </div>
   {:else}
-    <!-- 统计摘要 -->
-    <div class="timeline-summary-strip">
-      <div class="timeline-summary-copy">
-        <span>{t('timeline.recordSummary', { dateLabel: isToday ? t('timeline.todayLabel') : selectedDate, count: activities.length })}</span>
-        <span class="timeline-summary-divider">|</span>
-        <span>00:00 - {formatTime(activities[0].timestamp)}</span>
-      </div>
-      
-      <!-- 时段摘要链接 -->
+    <div class="page-card timeline-editorial-board overflow-hidden p-0">
+      <div class="timeline-summary-strip">
+        <div class="timeline-summary-copy">
+          <span>{t('timeline.recordSummary', { dateLabel: isToday ? t('timeline.todayLabel') : selectedDate, count: activities.length })}</span>
+          <span class="timeline-summary-divider">|</span>
+          <span>00:00 - {formatTime(activities[0].timestamp)}</span>
+        </div>
+
         <a
           href="#/timeline/summary"
           class="page-control-btn timeline-summary-action"
@@ -608,9 +607,8 @@
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
           </svg>
         </a>
-    </div>
-    
-    <div class="page-card timeline-editorial-board overflow-hidden p-0">
+      </div>
+
       <!-- 时间线列表 -->
       <div class="timeline-editorial-shell">
         <div class="timeline-rail" aria-hidden="true"></div>
@@ -858,8 +856,8 @@
     align-items: center;
     justify-content: space-between;
     gap: 1rem;
-    margin-bottom: 1rem;
-    padding: 0 0.25rem;
+    padding: 1.1rem 1.25rem 1rem;
+    border-bottom: 1px solid rgba(226, 232, 240, 0.82);
   }
 
   .timeline-summary-copy {
@@ -1399,6 +1397,10 @@
     background: rgba(15, 23, 42, 0.66);
   }
 
+  :global(.dark) .timeline-summary-strip {
+    border-bottom-color: rgba(71, 85, 105, 0.72);
+  }
+
   :global(.dark) .timeline-entry-card-compact {
     background: rgba(15, 23, 42, 0.54);
   }
@@ -1493,6 +1495,7 @@
     .timeline-summary-strip {
       align-items: flex-start;
       flex-direction: column;
+      padding: 1rem 0.85rem 0.9rem;
     }
 
     .timeline-editorial-shell {

@@ -6,8 +6,12 @@ export default defineConfig({
   plugins: [svelte()],
   clearScreen: false,
   server: {
+    host: '127.0.0.1',
     port: 5173,
     strictPort: true,
+    hmr: {
+      host: '127.0.0.1',
+    },
   },
   envPrefix: ['VITE_', 'TAURI_'],
   build: {

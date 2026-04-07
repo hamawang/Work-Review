@@ -4629,8 +4629,10 @@ pub async fn take_screenshot(state: State<'_, Arc<Mutex<AppState>>>) -> Result<A
 
         #[cfg(target_os = "linux")]
         let active_window = if active_window.is_none()
-            && !matches!(current_linux_desktop_session(), LinuxDesktopSession::Wayland)
-        {
+            && !matches!(
+                current_linux_desktop_session(),
+                LinuxDesktopSession::Wayland
+            ) {
             return Err(AppError::Unknown("获取当前活动窗口失败".to_string()));
         } else {
             active_window
@@ -4673,8 +4675,12 @@ pub async fn take_screenshot(state: State<'_, Arc<Mutex<AppState>>>) -> Result<A
         let executable_path = active_window
             .as_ref()
             .and_then(|window| window.executable_path.clone());
-        let classification =
-            crate::resolve_activity_classification(&state.config, &app_name, &window_title, browser_url.as_deref());
+        let classification = crate::resolve_activity_classification(
+            &state.config,
+            &app_name,
+            &window_title,
+            browser_url.as_deref(),
+        );
 
         (
             result,

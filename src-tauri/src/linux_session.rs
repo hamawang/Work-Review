@@ -121,14 +121,11 @@ pub fn current_linux_desktop_environment() -> LinuxDesktopEnvironment {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        detect_linux_desktop_environment, LinuxDesktopEnvironment, LinuxDesktopSession,
-    };
+    use super::{detect_linux_desktop_environment, LinuxDesktopEnvironment, LinuxDesktopSession};
 
     #[test]
     fn xdg_current_desktop应优先识别_gnome() {
-        let detected =
-            detect_linux_desktop_environment(Some("ubuntu:GNOME"), Some("plasma"));
+        let detected = detect_linux_desktop_environment(Some("ubuntu:GNOME"), Some("plasma"));
         assert_eq!(detected, LinuxDesktopEnvironment::Gnome);
     }
 
@@ -140,8 +137,7 @@ mod tests {
 
     #[test]
     fn 未命中桌面环境时应回退_unknown() {
-        let detected =
-            detect_linux_desktop_environment(Some(""), Some("custom-session"));
+        let detected = detect_linux_desktop_environment(Some(""), Some("custom-session"));
         assert_eq!(detected, LinuxDesktopEnvironment::Unknown);
     }
 
