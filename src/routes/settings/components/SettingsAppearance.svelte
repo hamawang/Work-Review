@@ -35,6 +35,7 @@
   let avatarToggleUi;
   let runtimePlatform = '';
   let linuxSessionSupport = null;
+  let gnomeExtensionInstalling = false;
 
   // === 背景图片 ===
   let bgPreview = null;
@@ -67,6 +68,18 @@
     : linuxSessionSupport?.avatarInputSupportLevel === 'mouse-only'
       ? 'settingsAppearance.avatarInputMouseOnlyHint'
       : 'settingsAppearance.avatarInputUnavailableHint';
+  $: showGnomeExtensionInstaller = runtimePlatform === 'linux'
+    && linuxSessionSupport?.desktopEnvironment === 'gnome'
+    && !linuxSessionSupport?.gnomeAvatarExtensionEnabled;
+
+  async function refreshLinuxSessionSupport() {
+    runtimePlatform = await invoke('get_runtime_platform');
+    if (runtimePlatform === 'linux') {
+      linuxSessionSupport = await invoke('get_linux_session_support');
+    } else {
+      linuxSessionSupport = null;
+    }
+  }
 
   onMount(async () => {
     try {
@@ -75,10 +88,7 @@
     } catch (e) { /* ignore */ }
 
     try {
-      runtimePlatform = await invoke('get_runtime_platform');
-      if (runtimePlatform === 'linux') {
-        linuxSessionSupport = await invoke('get_linux_session_support');
-      }
+      await refreshLinuxSessionSupport();
     } catch (e) {
       console.error('读取 Linux 桌宠联动能力失败:', e);
       linuxSessionSupport = null;
@@ -279,6 +289,24 @@
       }
     }));
   }
+
+  async function installGnomeAvatarExtension() {
+    if (gnomeExtensionInstalling) {
+      return;
+    }
+
+    gnomeExtensionInstalling = true;
+    try {
+      const result = await invoke('install_gnome_avatar_extension');
+      showToast(result.message, result.enabled ? 'success' : 'info');
+      await refreshLinuxSessionSupport();
+    } catch (e) {
+      console.error('自动安装 GNOME 桌宠扩展失败:', e);
+      showToast(t('settingsAppearance.avatarGnomeExtensionInstallFailed', { error: e }), 'error');
+    } finally {
+      gnomeExtensionInstalling = false;
+    }
+  }
 </script>
 
 <div class="settings-card" data-locale={currentLocale}>
@@ -335,6 +363,37 @@
         <div class="mt-2 text-[12px] text-slate-500 dark:text-slate-400">
           {t(avatarInputSupportHintKey)}
         </div>
+
+        {#if linuxSessionSupport.desktopEnvironment === 'gnome'}
+          <div class="mt-3 flex items-center justify-between gap-3 text-sm">
+            <div class="settings-subtle">{t('settingsAppearance.avatarGnomeExtensionTitle')}</div>
+            <div class="font-semibold text-slate-700 dark:text-slate-200">
+              {linuxSessionSupport.gnomeAvatarExtensionEnabled
+                ? t('settingsAppearance.avatarGnomeExtensionReady')
+                : linuxSessionSupport.gnomeAvatarExtensionInstalled
+                  ? t('settingsAppearance.avatarGnomeExtensionInstalled')
+                  : t('settingsAppearance.avatarGnomeExtensionMissing')}
+            </div>
+          </div>
+
+          {#if showGnomeExtensionInstaller}
+            <div class="mt-3 flex items-center justify-between gap-3">
+              <div class="text-[12px] text-slate-500 dark:text-slate-400">
+                {t('settingsAppearance.avatarGnomeExtensionHint')}
+              </div>
+              <button
+                type="button"
+                on:click={installGnomeAvatarExtension}
+                class="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:bg-white disabled:cursor-wait disabled:opacity-60 dark:border-slate-600 dark:text-slate-200 dark:hover:border-slate-500 dark:hover:bg-slate-800"
+                disabled={gnomeExtensionInstalling}
+              >
+                {gnomeExtensionInstalling
+                  ? t('settingsAppearance.avatarGnomeExtensionInstalling')
+                  : t('settingsAppearance.avatarGnomeExtensionInstall')}
+              </button>
+            </div>
+          {/if}
+        {/if}
       </div>
     {/if}
 

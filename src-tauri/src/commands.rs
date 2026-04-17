@@ -53,6 +53,14 @@ const MANAGED_DATA_ENTRIES: &[&str] = &[
     "update_settings.json",
 ];
 const LIVE_DATABASE_FILES: &[&str] = &["workreview.db", "workreview.db-shm", "workreview.db-wal"];
+#[cfg(target_os = "linux")]
+const GNOME_AVATAR_EXTENSION_UUID: &str = "work-review-avatar-input@workreview.app";
+#[cfg(target_os = "linux")]
+const GNOME_AVATAR_EXTENSION_METADATA: &str =
+    include_str!("../../scripts/gnome-shell/work-review-avatar-input@workreview.app/metadata.json");
+#[cfg(target_os = "linux")]
+const GNOME_AVATAR_EXTENSION_SOURCE: &str =
+    include_str!("../../scripts/gnome-shell/work-review-avatar-input@workreview.app/extension.js");
 
 /// 模型测试结果
 #[derive(Serialize, Deserialize, Debug)]
@@ -144,6 +152,17 @@ pub struct LinuxSessionSupportInfo {
     pub avatar_input_support_level: String,
     pub avatar_keyboard_supported: bool,
     pub avatar_mouse_supported: bool,
+    pub gnome_avatar_extension_installed: bool,
+    pub gnome_avatar_extension_enabled: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct GnomeAvatarExtensionInstallResult {
+    pub installed: bool,
+    pub enabled: bool,
+    pub extension_dir: String,
+    pub message: String,
 }
 
 #[derive(Serialize, Debug, Clone)]
@@ -228,6 +247,42 @@ fn export_daily_report_markdown(
     let output_path = build_daily_report_export_path(export_dir, date);
     std::fs::write(output_path, content)?;
     Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn gnome_avatar_extension_install_dir() -> Result<PathBuf, AppError> {
+    let data_home = std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|home| home.join(".local").join("share")))
+        .ok_or_else(|| AppError::Unknown("无法定位当前用户的数据目录".to_string()))?;
+
+    Ok(data_home
+        .join("gnome-shell")
+        .join("extensions")
+        .join(GNOME_AVATAR_EXTENSION_UUID))
+}
+
+#[cfg(target_os = "linux")]
+fn is_gnome_avatar_extension_installed() -> bool {
+    gnome_avatar_extension_install_dir()
+        .ok()
+        .map(|dir| dir.join("metadata.json").exists() && dir.join("extension.js").exists())
+        .unwrap_or(false)
+}
+
+#[cfg(target_os = "linux")]
+fn is_gnome_avatar_extension_enabled() -> bool {
+    std::process::Command::new("gnome-extensions")
+        .args(["list", "--enabled"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| {
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .any(|line| line.trim() == GNOME_AVATAR_EXTENSION_UUID)
+        })
+        .unwrap_or(false)
 }
 
 fn build_versioned_updater_endpoint(endpoint: &str, version: &str) -> Option<String> {
@@ -4148,6 +4203,12 @@ pub async fn get_linux_session_support() -> Result<LinuxSessionSupportInfo, AppE
         let active_window_provider =
             crate::monitor::current_linux_active_window_provider(session, desktop_environment);
         let avatar_input_support = crate::avatar_input::current_linux_avatar_input_support();
+        let gnome_avatar_extension_installed = desktop_environment
+            == crate::linux_session::LinuxDesktopEnvironment::Gnome
+            && is_gnome_avatar_extension_installed();
+        let gnome_avatar_extension_enabled = desktop_environment
+            == crate::linux_session::LinuxDesktopEnvironment::Gnome
+            && is_gnome_avatar_extension_enabled();
         let active_window_supported = active_window_provider.is_some();
         let browser_url_support_level = if active_window_supported {
             "mixed"
@@ -4167,6 +4228,8 @@ pub async fn get_linux_session_support() -> Result<LinuxSessionSupportInfo, AppE
             avatar_input_support_level: avatar_input_support.support_level.to_string(),
             avatar_keyboard_supported: avatar_input_support.keyboard_supported,
             avatar_mouse_supported: avatar_input_support.mouse_supported,
+            gnome_avatar_extension_installed,
+            gnome_avatar_extension_enabled,
         });
     }
 
@@ -4184,7 +4247,71 @@ pub async fn get_linux_session_support() -> Result<LinuxSessionSupportInfo, AppE
             avatar_input_support_level: "not_applicable".to_string(),
             avatar_keyboard_supported: false,
             avatar_mouse_supported: false,
+            gnome_avatar_extension_installed: false,
+            gnome_avatar_extension_enabled: false,
         })
+    }
+}
+
+#[tauri::command]
+pub async fn install_gnome_avatar_extension() -> Result<GnomeAvatarExtensionInstallResult, AppError>
+{
+    #[cfg(target_os = "linux")]
+    {
+        let session = current_linux_desktop_session();
+        let desktop_environment = current_linux_desktop_environment();
+
+        if desktop_environment != crate::linux_session::LinuxDesktopEnvironment::Gnome {
+            return Err(AppError::Unknown(
+                "当前不是 GNOME 会话，无法自动安装 GNOME 桌宠扩展".to_string(),
+            ));
+        }
+
+        let install_dir = gnome_avatar_extension_install_dir()?;
+        std::fs::create_dir_all(&install_dir)
+            .map_err(|e| AppError::Unknown(format!("创建 GNOME 扩展目录失败: {e}")))?;
+        std::fs::write(
+            install_dir.join("metadata.json"),
+            GNOME_AVATAR_EXTENSION_METADATA,
+        )
+        .map_err(|e| AppError::Unknown(format!("写入 GNOME 扩展 metadata 失败: {e}")))?;
+        std::fs::write(
+            install_dir.join("extension.js"),
+            GNOME_AVATAR_EXTENSION_SOURCE,
+        )
+        .map_err(|e| AppError::Unknown(format!("写入 GNOME 扩展脚本失败: {e}")))?;
+
+        let enabled = std::process::Command::new("gnome-extensions")
+            .args(["enable", GNOME_AVATAR_EXTENSION_UUID])
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .is_some()
+            || is_gnome_avatar_extension_enabled();
+
+        let message = if enabled {
+            format!(
+                "GNOME 桌宠扩展已安装并启用（{} / {}）",
+                session.as_str(),
+                desktop_environment.as_str()
+            )
+        } else {
+            "GNOME 桌宠扩展文件已写入，请确认系统已安装 gnome-extensions 并手动启用扩展".to_string()
+        };
+
+        return Ok(GnomeAvatarExtensionInstallResult {
+            installed: true,
+            enabled,
+            extension_dir: install_dir.to_string_lossy().to_string(),
+            message,
+        });
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        Err(AppError::Unknown(
+            "只有 Linux GNOME 会话支持自动安装桌宠扩展".to_string(),
+        ))
     }
 }
 

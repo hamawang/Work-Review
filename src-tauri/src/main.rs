@@ -9,8 +9,8 @@ extern crate objc;
 mod activity_classifier;
 mod analysis;
 mod autostart;
-mod avatar_input;
 mod avatar_engine;
+mod avatar_input;
 mod commands;
 mod config;
 mod database;
@@ -379,9 +379,7 @@ fn launch_args_request_hidden_window(args: &[String]) -> bool {
 }
 
 fn should_hide_main_window_on_setup(config: &AppConfig, launch_args: &[String]) -> bool {
-    config.auto_start
-        && config.auto_start_silent
-        && launch_args_request_hidden_window(launch_args)
+    config.auto_start && config.auto_start_silent && launch_args_request_hidden_window(launch_args)
 }
 
 fn should_request_screen_capture_permission(
@@ -779,8 +777,12 @@ pub(crate) fn resolve_activity_classification(
     window_title: &str,
     browser_url: Option<&str>,
 ) -> activity_classifier::ActivityClassification {
-    let base_category =
-        monitor::categorize_app_with_rules(&config.app_category_rules, app_name, window_title, &config.custom_categories);
+    let base_category = monitor::categorize_app_with_rules(
+        &config.app_category_rules,
+        app_name,
+        window_title,
+        &config.custom_categories,
+    );
     let mut classification = activity_classifier::classify_activity_with_base_category(
         app_name,
         window_title,
@@ -1163,10 +1165,7 @@ fn should_skip_system_window(active_window: &monitor::ActiveWindow) -> bool {
     // 需要结合标题与可执行路径一起兜底过滤。
     let is_windows_system_dialog = is_windows_system_dialog(active_window);
 
-    is_sys
-        || is_minimized_window
-        || is_explorer_shell
-        || is_windows_system_dialog
+    is_sys || is_minimized_window || is_explorer_shell || is_windows_system_dialog
 }
 
 async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
@@ -1941,25 +1940,22 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
 
                     // 合并记录（不更新 screenshot_path，保留活动创建时的原始截图）
                     // 即使 effective_duration 为 0，也需要更新时间戳以保持记录活跃
-                    let (
-                        latest_archive_path,
-                        ocr_input_path,
-                        temporary_ocr_source_path,
-                    ) = if let Some(ref screenshot) = screenshot_result {
-                        (
-                            Some(screenshot.path.clone()),
-                            screenshot
-                                .ocr_source_path
-                                .clone()
-                                .unwrap_or_else(|| screenshot.path.clone()),
-                            screenshot
-                                .ocr_source_path
-                                .clone()
-                                .filter(|path| path != &screenshot.path),
-                        )
-                    } else {
-                        (None, PathBuf::new(), None)
-                    };
+                    let (latest_archive_path, ocr_input_path, temporary_ocr_source_path) =
+                        if let Some(ref screenshot) = screenshot_result {
+                            (
+                                Some(screenshot.path.clone()),
+                                screenshot
+                                    .ocr_source_path
+                                    .clone()
+                                    .unwrap_or_else(|| screenshot.path.clone()),
+                                screenshot
+                                    .ocr_source_path
+                                    .clone()
+                                    .filter(|path| path != &screenshot.path),
+                            )
+                        } else {
+                            (None, PathBuf::new(), None)
+                        };
 
                     let persisted_screenshot_path = previous_screenshot_path.clone();
                     let mut persisted_duration = latest.duration;
@@ -2024,8 +2020,7 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                                 &latest_capture_path,
                             )
                             .unwrap_or(0);
-                            let last_hash =
-                                merge_hash.swap(current_hash, Ordering::Relaxed);
+                            let last_hash = merge_hash.swap(current_hash, Ordering::Relaxed);
 
                             let should_ocr = if last_hash != 0 {
                                 let similarity = screenshot::ScreenshotService::hash_similarity(
@@ -3014,6 +3009,7 @@ async fn main() {
             commands::get_default_data_dir,
             commands::get_runtime_platform,
             commands::get_linux_session_support,
+            commands::install_gnome_avatar_extension,
             commands::change_data_dir,
             commands::cleanup_old_data_dir,
             commands::check_github_update,
@@ -3114,8 +3110,7 @@ mod tests {
         monitoring_poll_interval_ms_for_platform, previous_app_backfill_duration,
         recording_loop_decision, resolve_activity_classification, reusable_cached_active_window,
         screen_lock_check_interval_ms_for_platform, should_confirm_idle,
-        should_persist_merge_update,
-        should_hide_main_window_on_setup, should_prevent_exit,
+        should_hide_main_window_on_setup, should_persist_merge_update, should_prevent_exit,
         should_probe_browser_url_before_change_detection, should_request_screen_capture_permission,
         should_skip_system_window, tray_recording_toggle_action, tray_recording_toggle_label,
         BreakReminderRuntime, BreakReminderSignal, MainWindowCloseBehavior, RecordingToggleAction,
