@@ -1687,7 +1687,7 @@ mod tests {
         capture_target_point, linux_screenshot_support_for_session, normalize_linux_crop_rect,
         parse_xrandr_active_monitor_rects, should_capture_all_displays, ScreenshotService,
     };
-    use crate::config::{ScreenshotDisplayMode, StorageConfig};
+    use crate::config::{ScreenshotDisplayMode, ScreenshotWidthMode, StorageConfig};
     use crate::linux_session::{LinuxDesktopEnvironment, LinuxDesktopSession};
     use crate::monitor::{ActiveWindow, WindowBounds};
     use base64::Engine as _;
@@ -1861,6 +1861,7 @@ Monitors: 2
         let storage = StorageConfig {
             jpeg_quality: 85,
             max_image_width: 1440,
+            screenshot_width_mode: ScreenshotWidthMode::Fixed,
             ..StorageConfig::default()
         };
         let service = ScreenshotService::new(&data_dir, &storage);
@@ -1898,6 +1899,7 @@ Monitors: 2
         let storage = StorageConfig {
             jpeg_quality: 85,
             max_image_width: 1440,
+            screenshot_width_mode: ScreenshotWidthMode::Fixed,
             ..StorageConfig::default()
         };
         let service = ScreenshotService::new(&data_dir, &storage);
