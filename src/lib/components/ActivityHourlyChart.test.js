@@ -21,7 +21,7 @@ test('按小时活跃度图表应将所选时段直接显示在柱状图内', as
 });
 
 test('按小时活跃度图表文案不应继续维护独立所选时段提示', async () => {
-  const source = await readFile(new URL('../i18n/index.js', import.meta.url), 'utf8');
+  const source = await readFile(new URL('../i18n/locales/zh-CN.js', import.meta.url), 'utf8');
 
   assert.equal((source.match(/selectedHour:/g) || []).length, 0);
   assert.equal((source.match(/selectedHourHint:/g) || []).length, 0);

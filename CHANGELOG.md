@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.44] - 2026-04-30
+
+### 优化
+- 移除未使用的前端依赖 `chart.js` 和 `@tauri-apps/plugin-fs`，减小安装包体积。
+- 移除未使用的 Rust 依赖 `toml`，收窄 `tokio` features 从 `full` 到按需启用（rt-multi-thread、macros、sync、time、net、fs、io-util）。
+- 排除 Live2D SDK 构建产物进入 dist，通过 Vite `closeBundle` 插件自动清理。
+- 修复 i18n 区域文件拆分后多个测试文件的路径引用错误。
+
 ## [1.0.43] - 2026-04-30
 
 ### 新增

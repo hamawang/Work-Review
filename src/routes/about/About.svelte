@@ -6,9 +6,9 @@
   import { locale, t } from '$lib/i18n/index.js';
   import { runUpdateFlow } from '$lib/utils/updater.js';
 
-  const wechatSponsorshipQr = new URL('../../../docs/group/vx.png', import.meta.url).href;
+  const wechatSponsorshipQr = new URL('../../../docs/sponsorship/vx.png', import.meta.url).href;
   const alipaySponsorshipQr = new URL('../../../docs/sponsorship/zfb.png', import.meta.url).href;
-  const bmcQr = new URL('../../../docs/group/buycoffee.png', import.meta.url).href;
+  const bmcQr = new URL('../../../docs/sponsorship/buycoffee.png', import.meta.url).href;
 
   let appVersion = '';
   let isCheckingUpdate = false;
@@ -230,8 +230,8 @@
             </div>
             <h4 class="text-base font-semibold text-slate-900 dark:text-white">{t('about.wechat')}</h4>
           </div>
-          <div class="mt-4 rounded-[24px] bg-white p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] dark:bg-slate-950">
-            <img src={wechatSponsorshipQr} alt={t('about.wechatQrAlt')} class="mx-auto aspect-square w-full cursor-zoom-in rounded-2xl object-contain transition-transform hover:scale-[1.02]" on:click={() => zoomedQr = wechatSponsorshipQr} />
+          <div class="mt-4 flex items-center justify-center rounded-[24px] bg-white p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] dark:bg-slate-950">
+            <img src={wechatSponsorshipQr} alt={t('about.wechatQrAlt')} class="aspect-square w-40 cursor-zoom-in rounded-2xl object-cover transition-transform hover:scale-[1.02]" on:click={() => zoomedQr = wechatSponsorshipQr} />
           </div>
         </div>
 
@@ -245,8 +245,8 @@
             </div>
             <h4 class="text-base font-semibold text-slate-900 dark:text-white">{t('about.alipay')}</h4>
           </div>
-          <div class="mt-4 rounded-[24px] bg-white p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] dark:bg-slate-950">
-            <img src={alipaySponsorshipQr} alt={t('about.alipayQrAlt')} class="mx-auto aspect-square w-full cursor-zoom-in rounded-2xl object-contain transition-transform hover:scale-[1.02]" on:click={() => zoomedQr = alipaySponsorshipQr} />
+          <div class="mt-4 flex items-center justify-center rounded-[24px] bg-white p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] dark:bg-slate-950">
+            <img src={alipaySponsorshipQr} alt={t('about.alipayQrAlt')} class="aspect-square w-40 cursor-zoom-in rounded-2xl object-cover transition-transform hover:scale-[1.02]" on:click={() => zoomedQr = alipaySponsorshipQr} />
           </div>
         </div>
 
@@ -261,8 +261,8 @@
             </div>
             <h4 class="text-base font-semibold text-slate-900 dark:text-white">Buy Me a Coffee</h4>
           </div>
-          <div class="mt-4 rounded-[24px] bg-white p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] dark:bg-slate-950">
-            <img src={bmcQr} alt="Buy Me a Coffee QR code" class="mx-auto aspect-square w-full cursor-zoom-in rounded-2xl object-contain transition-transform hover:scale-[1.02]" on:click={() => zoomedQr = bmcQr} />
+          <div class="mt-4 flex items-center justify-center rounded-[24px] bg-white p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] dark:bg-slate-950">
+            <img src={bmcQr} alt="Buy Me a Coffee QR code" class="aspect-square w-40 cursor-zoom-in rounded-2xl object-cover transition-transform hover:scale-[1.02]" on:click={() => zoomedQr = bmcQr} />
           </div>
         </div>
       </div>

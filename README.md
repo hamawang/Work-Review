@@ -219,7 +219,7 @@ npm run tauri:build  # 构建
 <p align="center"><strong>微信群</strong></p>
 
 <p align="center">
-  <img src="docs/group/vx.png" alt="微信群" width="220" />
+  <img src="docs/group/vx.jpg" alt="微信群" width="220" />
 </p>
 
 <p align="center"><strong>公众号</strong></p>
