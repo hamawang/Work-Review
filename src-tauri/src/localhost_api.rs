@@ -646,6 +646,56 @@ async fn route_request(
                 Err(e) => Err(e),
             }
         }
+        ("GET", "/v1/stats/today") => {
+            commands::get_today_stats_inner(state)
+                .map(|stats| HttpResponse::json(200, &stats))
+        }
+        ("GET", "/v1/stats/overview") => {
+            let mode = request.query.get("mode").cloned().unwrap_or_else(|| "today".to_string());
+            let date = request.query.get("date").cloned();
+            let date_from = request.query.get("date_from").cloned();
+            let date_to = request.query.get("date_to").cloned();
+            commands::get_overview_stats_inner(mode, date, date_from, date_to, state)
+                .map(|stats| HttpResponse::json(200, &stats))
+        }
+        _ if request.method == "GET" && request.path.starts_with("/v1/stats/daily/") => {
+            let date = request.path.trim_start_matches("/v1/stats/daily/").trim();
+            if date.is_empty() {
+                Err(AppError::Config("日期不能为空".to_string()))
+            } else {
+                commands::get_daily_stats_inner(date, state)
+                    .map(|stats| HttpResponse::json(200, &stats))
+            }
+        }
+        ("GET", "/v1/apps/recent") => {
+            commands::get_recent_apps_inner(state)
+                .map(|apps| HttpResponse::json(200, &serde_json::json!({ "apps": apps })))
+        }
+        ("GET", "/v1/apps/category-overview") => {
+            commands::get_app_category_overview_inner(state)
+                .map(|overview| HttpResponse::json(200, &overview))
+        }
+        ("GET", "/v1/categories") => {
+            commands::get_categories_inner(state)
+                .map(|categories| HttpResponse::json(200, &categories))
+        }
+        ("GET", "/v1/categories/semantic") => {
+            commands::get_semantic_categories_inner(state)
+                .map(|categories| HttpResponse::json(200, &categories))
+        }
+        _ if request.method == "GET" && request.path.starts_with("/v1/hourly-summaries/") => {
+            let date = request.path.trim_start_matches("/v1/hourly-summaries/").trim();
+            if date.is_empty() {
+                Err(AppError::Config("日期不能为空".to_string()))
+            } else {
+                commands::get_hourly_summaries_inner(date, state)
+                    .map(|summaries| HttpResponse::json(200, &summaries))
+            }
+        }
+        ("GET", "/v1/storage/stats") => {
+            commands::get_storage_stats_inner(state)
+                .map(|stats| HttpResponse::json(200, &stats))
+        }
         ("GET", "/v1/device") => handle_device_info(state),
         ("GET", "/v1/weekly-review") => {
             let date_from = request.query.get("date_from").cloned();
@@ -672,6 +722,22 @@ async fn route_request(
             } else {
                 match state.lock() {
                     Ok(s) => s.database.get_hourly_app_breakdown(date)
+                        .map(|result| HttpResponse::json(200, &result)),
+                    Err(e) => Err(AppError::Unknown(e.to_string())),
+                }
+            }
+        }
+        _ if request.method == "GET" && request.path.starts_with("/v1/activities/") => {
+            let date = request.path.trim_start_matches("/v1/activities/").trim();
+            if date.is_empty() {
+                Err(AppError::Config("日期不能为空".to_string()))
+            } else {
+                let limit: usize = request.query
+                    .get("limit")
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(10000);
+                match state.lock() {
+                    Ok(s) => s.database.get_activities_in_range(Some(date), None, limit)
                         .map(|result| HttpResponse::json(200, &result)),
                     Err(e) => Err(AppError::Unknown(e.to_string())),
                 }

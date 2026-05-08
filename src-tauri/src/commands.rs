@@ -3174,11 +3174,8 @@ fn resolve_overview_date_span(
     })
 }
 
-/// 获取今日统计
-#[tauri::command]
-pub async fn get_today_stats(
-    state: State<'_, Arc<Mutex<AppState>>>,
-) -> Result<DailyStats, AppError> {
+/// 获取今日统计 —— 内部复用版（供 Tauri 命令与 localhost API 共用）
+pub(crate) fn get_today_stats_inner(state: &Arc<Mutex<AppState>>) -> Result<DailyStats, AppError> {
     let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     let stats = load_daily_stats_for_overview(&state, &today)?;
@@ -3187,14 +3184,21 @@ pub async fn get_today_stats(
     Ok(apply_excluded_domains_to_stats(stats, &excluded_domains))
 }
 
-/// 获取概览统计（支持今日 / 指定日期 / 本周）
+/// 获取今日统计
 #[tauri::command]
-pub async fn get_overview_stats(
+pub async fn get_today_stats(
+    state: State<'_, Arc<Mutex<AppState>>>,
+) -> Result<DailyStats, AppError> {
+    get_today_stats_inner(state.inner())
+}
+
+/// 获取概览统计 —— 内部复用版
+pub(crate) fn get_overview_stats_inner(
     mode: String,
     date: Option<String>,
     date_from: Option<String>,
     date_to: Option<String>,
-    state: State<'_, Arc<Mutex<AppState>>>,
+    state: &Arc<Mutex<AppState>>,
 ) -> Result<DailyStats, AppError> {
     let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
     let normalized_mode = mode.trim().to_lowercase();
@@ -3253,24 +3257,40 @@ pub async fn get_overview_stats(
     Ok(apply_excluded_domains_to_stats(stats, &excluded_domains))
 }
 
+/// 获取概览统计（支持今日 / 指定日期 / 本周）
+#[tauri::command]
+pub async fn get_overview_stats(
+    mode: String,
+    date: Option<String>,
+    date_from: Option<String>,
+    date_to: Option<String>,
+    state: State<'_, Arc<Mutex<AppState>>>,
+) -> Result<DailyStats, AppError> {
+    get_overview_stats_inner(mode, date, date_from, date_to, state.inner())
+}
+
+/// 获取指定日期的统计 —— 内部复用版
+pub(crate) fn get_daily_stats_inner(
+    date: &str,
+    state: &Arc<Mutex<AppState>>,
+) -> Result<DailyStats, AppError> {
+    let s = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
+    let segments = s.config.effective_work_segments();
+    let raw_stats = s.database.get_daily_stats_with_segments(date, &segments)?;
+    let (ignored_apps, excluded_domains) = collect_privacy_filters(&s);
+    Ok(apply_excluded_domains_to_stats(
+        apply_ignored_apps_to_stats(raw_stats, &ignored_apps),
+        &excluded_domains,
+    ))
+}
+
 /// 获取指定日期的统计
 #[tauri::command]
 pub async fn get_daily_stats(
     date: String,
     state: State<'_, Arc<Mutex<AppState>>>,
 ) -> Result<DailyStats, AppError> {
-    let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
-    let segments = state.config.effective_work_segments();
-    let raw_stats = state
-        .database
-        .get_daily_stats_with_segments(&date, &segments)?;
-    // 与 get_overview_stats / generate_report_inner 保持口径一致：应用隐私过滤
-    let (ignored_apps, excluded_domains) = collect_privacy_filters(&state);
-    let stats = apply_excluded_domains_to_stats(
-        apply_ignored_apps_to_stats(raw_stats, &ignored_apps),
-        &excluded_domains,
-    );
-    Ok(stats)
+    get_daily_stats_inner(&date, state.inner())
 }
 
 /// 获取指定日期的时间线 —— 内部复用版（供 Tauri 命令与 localhost API 共用）
@@ -6359,45 +6379,49 @@ pub async fn take_screenshot(state: State<'_, Arc<Mutex<AppState>>>) -> Result<A
     Ok(activity)
 }
 
+/// 获取历史应用列表 —— 内部复用版
+pub(crate) fn get_recent_apps_inner(state: &Arc<Mutex<AppState>>) -> Result<Vec<String>, AppError> {
+    let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
+    state.database.get_recent_apps(50)
+}
+
 /// 获取历史应用列表（从数据库）
 #[tauri::command]
 pub async fn get_recent_apps(
     state: State<'_, Arc<Mutex<AppState>>>,
 ) -> Result<Vec<String>, AppError> {
-    // 获取最多 50 个历史应用
-    let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
-    state.database.get_recent_apps(50)
+    get_recent_apps_inner(state.inner())
+}
+
+/// 应用分类概览 —— 内部复用版
+pub(crate) fn get_app_category_overview_inner(state: &Arc<Mutex<AppState>>) -> Result<Vec<AppCategoryOverviewItem>, AppError> {
+    let s = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
+    let overview = s.database.get_app_category_overview()?;
+
+    Ok(overview
+        .into_iter()
+        .map(|item| {
+            let override_category = crate::monitor::find_category_override(
+                &s.config.app_category_rules,
+                &item.app_name,
+                &s.config.custom_categories,
+            );
+            let is_overridden = override_category.is_some();
+            AppCategoryOverviewItem {
+                app_name: item.app_name,
+                category: override_category.unwrap_or(item.category),
+                total_duration: item.total_duration,
+                is_overridden,
+            }
+        })
+        .collect())
 }
 
 #[tauri::command]
 pub async fn get_app_category_overview(
     state: State<'_, Arc<Mutex<AppState>>>,
 ) -> Result<Vec<AppCategoryOverviewItem>, AppError> {
-    let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
-    let overview = state.database.get_app_category_overview()?;
-
-    Ok(overview
-        .into_iter()
-        .map(|item| {
-            let app_name = item.app_name;
-            let override_category = crate::monitor::find_category_override(
-                &state.config.app_category_rules,
-                &app_name,
-                &state.config.custom_categories,
-            );
-            AppCategoryOverviewItem {
-                app_name: app_name.clone(),
-                category: override_category.unwrap_or(item.category),
-                total_duration: item.total_duration,
-                is_overridden: crate::monitor::find_category_override(
-                    &state.config.app_category_rules,
-                    &app_name,
-                    &state.config.custom_categories,
-                )
-                .is_some(),
-            }
-        })
-        .collect())
+    get_app_category_overview_inner(state.inner())
 }
 
 fn upsert_app_category_rule(config: &mut AppConfig, app_name: &str, category: &str) {
@@ -6553,14 +6577,10 @@ pub struct CategoryInfo {
     pub is_custom: bool,
 }
 
-#[tauri::command]
-pub async fn get_categories(
-    state: State<'_, Arc<Mutex<AppState>>>,
-) -> Result<Vec<CategoryInfo>, AppError> {
-    let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
+/// 分类信息 —— 内部复用版
+pub(crate) fn get_categories_inner(state: &Arc<Mutex<AppState>>) -> Result<Vec<CategoryInfo>, AppError> {
+    let s = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
     let mut result = Vec::new();
-
-    // 7 个预设分类
     let builtins: Vec<(&str, &str, &str, &str)> = vec![
         ("development", "开发工具", "blue", "⚡"),
         ("browser", "浏览器", "green", "🌐"),
@@ -6579,9 +6599,7 @@ pub async fn get_categories(
             is_custom: false,
         });
     }
-
-    // 用户自定义分类
-    for c in &state.config.custom_categories {
+    for c in &s.config.custom_categories {
         result.push(CategoryInfo {
             key: c.key.clone(),
             name: c.name.clone(),
@@ -6590,8 +6608,14 @@ pub async fn get_categories(
             is_custom: true,
         });
     }
-
     Ok(result)
+}
+
+#[tauri::command]
+pub async fn get_categories(
+    state: State<'_, Arc<Mutex<AppState>>>,
+) -> Result<Vec<CategoryInfo>, AppError> {
+    get_categories_inner(state.inner())
 }
 
 #[tauri::command]
@@ -6715,14 +6739,10 @@ pub struct SemanticCategoryInfo {
     pub is_custom: bool,
 }
 
-#[tauri::command]
-pub async fn get_semantic_categories(
-    state: State<'_, Arc<Mutex<AppState>>>,
-) -> Result<Vec<SemanticCategoryInfo>, AppError> {
-    let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
+/// 语义分类信息 —— 内部复用版
+pub(crate) fn get_semantic_categories_inner(state: &Arc<Mutex<AppState>>) -> Result<Vec<SemanticCategoryInfo>, AppError> {
+    let s = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
     let mut result = Vec::new();
-
-    // 13 个预设语义分类（key 即中文名，与 SEMANTIC_LABELS 对应）
     let builtins: Vec<(&str, &str)> = vec![
         ("编码开发", "编码开发"),
         ("内容撰写", "内容撰写"),
@@ -6745,17 +6765,21 @@ pub async fn get_semantic_categories(
             is_custom: false,
         });
     }
-
-    // 用户自定义语义分类
-    for c in &state.config.custom_semantic_categories {
+    for c in &s.config.custom_semantic_categories {
         result.push(SemanticCategoryInfo {
             key: c.key.clone(),
             name: c.name.clone(),
             is_custom: true,
         });
     }
-
     Ok(result)
+}
+
+#[tauri::command]
+pub async fn get_semantic_categories(
+    state: State<'_, Arc<Mutex<AppState>>>,
+) -> Result<Vec<SemanticCategoryInfo>, AppError> {
+    get_semantic_categories_inner(state.inner())
 }
 
 #[tauri::command]
@@ -7017,13 +7041,10 @@ fn get_running_apps_impl() -> Result<Vec<String>, AppError> {
     Ok(vec![])
 }
 
-/// 获取存储统计信息
-#[tauri::command]
-pub async fn get_storage_stats(
-    state: State<'_, Arc<Mutex<AppState>>>,
-) -> Result<serde_json::Value, AppError> {
-    let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
-    let stats = state
+/// 获取存储统计信息 —— 内部复用版
+pub(crate) fn get_storage_stats_inner(state: &Arc<Mutex<AppState>>) -> Result<serde_json::Value, AppError> {
+    let s = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
+    let stats = s
         .storage_manager
         .get_stats()
         .map_err(|e| AppError::Unknown(e.to_string()))?;
@@ -7036,24 +7057,31 @@ pub async fn get_storage_stats(
     }))
 }
 
-/// 获取指定日期的小时摘要
+/// 获取存储统计信息
 #[tauri::command]
-pub async fn get_hourly_summaries(
-    date: String,
+pub async fn get_storage_stats(
     state: State<'_, Arc<Mutex<AppState>>>,
+) -> Result<serde_json::Value, AppError> {
+    get_storage_stats_inner(state.inner())
+}
+
+/// 获取指定日期的小时摘要 —— 内部复用版
+pub(crate) fn get_hourly_summaries_inner(
+    date: &str,
+    state: &Arc<Mutex<AppState>>,
 ) -> Result<Vec<serde_json::Value>, AppError> {
-    let app_state = state.inner().clone();
+    let app_state = state.clone();
 
     for hour in 0..24 {
-        crate::generate_and_save_summary(&app_state, &date, hour);
+        crate::generate_and_save_summary(&app_state, date, hour);
     }
 
-    let state = app_state
+    let s = app_state
         .lock()
         .map_err(|e| AppError::Unknown(e.to_string()))?;
-    let summaries = state.database.get_hourly_summaries(&date)?;
+    let summaries = s.database.get_hourly_summaries(date)?;
 
-    let result: Vec<serde_json::Value> = summaries
+    Ok(summaries
         .iter()
         .map(|s| {
             serde_json::json!({
@@ -7064,9 +7092,16 @@ pub async fn get_hourly_summaries(
                 "total_duration": s.total_duration,
             })
         })
-        .collect();
+        .collect())
+}
 
-    Ok(result)
+/// 获取指定日期的小时摘要
+#[tauri::command]
+pub async fn get_hourly_summaries(
+    date: String,
+    state: State<'_, Arc<Mutex<AppState>>>,
+) -> Result<Vec<serde_json::Value>, AppError> {
+    get_hourly_summaries_inner(&date, state.inner())
 }
 
 /// 清理今天之前的所有活动记录

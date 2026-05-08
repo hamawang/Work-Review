@@ -19,6 +19,7 @@
   let tgTokenVisible = false;
   let feishuSecretVisible = false;
   let examplesExpanded = false;
+  let activeApiCategory = 'all';
   let tgStatusPollId = null;
   $: currentLocale = $locale;
 
@@ -624,15 +625,48 @@
           {#if examplesExpanded}
           <div class="mt-2 space-y-1.5">
             <p class="text-[11px] text-slate-400 dark:text-slate-500">{t('nodeGatewayPage.apiExamplesHint')}</p>
+            <!-- 分类按钮 -->
+            <div class="flex flex-wrap gap-1.5 mb-1">
+              {#each [
+                { key: 'all', label: t('nodeGatewayPage.apiCategoryAll') },
+                { key: 'report', label: t('nodeGatewayPage.apiCategoryReport') },
+                { key: 'timeline', label: t('nodeGatewayPage.apiCategoryTimeline') },
+                { key: 'stats', label: t('nodeGatewayPage.apiCategoryStats') },
+                { key: 'system', label: t('nodeGatewayPage.apiCategorySystem') },
+              ] as cat}
+                <button
+                  type="button"
+                  on:click={() => activeApiCategory = cat.key}
+                  class="px-2 py-0.5 rounded-md text-[11px] font-medium transition-colors
+                         {activeApiCategory === cat.key
+                           ? 'bg-slate-700 text-white dark:bg-slate-200 dark:text-slate-800'
+                           : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'}"
+                >{cat.label}</button>
+              {/each}
+            </div>
+
             {#each [
-              { label: 'GET /health', desc: t('nodeGatewayPage.exampleHealthDesc'), cmd: curlCommand('GET', '/health') },
-              { label: 'GET /v1/device', desc: t('nodeGatewayPage.exampleDeviceDesc'), cmd: curlCommand('GET', '/v1/device') },
-              { label: 'GET /v1/reports', desc: t('nodeGatewayPage.exampleReportsDesc'), cmd: curlCommand('GET', '/v1/reports') },
-              { label: 'GET /v1/reports/:date', desc: t('nodeGatewayPage.exampleReportByDateDesc'), cmd: curlCommand('GET', '/v1/reports/2025-01-15') },
-              { label: 'POST /v1/reports/generate', desc: t('nodeGatewayPage.exampleGenerateDesc'), cmd: curlCommand('POST', '/v1/reports/generate', { date: '2025-01-15' }) },
-              { label: 'GET /v1/timeline/:date', desc: t('nodeGatewayPage.exampleTimelineDesc'), cmd: curlCommand('GET', '/v1/timeline/2025-01-15') },
-              { label: 'GET /v1/weekly-review', desc: t('nodeGatewayPage.exampleWeeklyReviewDesc'), cmd: curlCommand('GET', '/v1/weekly-review?date_from=2025-01-13&date_to=2025-01-19') },
+              { cat: 'system', label: 'GET /health', desc: t('nodeGatewayPage.exampleHealthDesc'), cmd: curlCommand('GET', '/health') },
+              { cat: 'system', label: 'GET /v1/device', desc: t('nodeGatewayPage.exampleDeviceDesc'), cmd: curlCommand('GET', '/v1/device') },
+              { cat: 'system', label: 'GET /v1/storage/stats', desc: t('nodeGatewayPage.exampleStorageStatsDesc'), cmd: curlCommand('GET', '/v1/storage/stats') },
+              { cat: 'report', label: 'GET /v1/reports', desc: t('nodeGatewayPage.exampleReportsDesc'), cmd: curlCommand('GET', '/v1/reports') },
+              { cat: 'report', label: 'GET /v1/reports/:date', desc: t('nodeGatewayPage.exampleReportByDateDesc'), cmd: curlCommand('GET', '/v1/reports/2025-01-15') },
+              { cat: 'report', label: 'GET /v1/reports/generate', desc: t('nodeGatewayPage.exampleGenerateDesc'), cmd: curlCommand('GET', '/v1/reports/generate?date=2025-01-15') },
+              { cat: 'report', label: 'POST /v1/reports/export-markdown', desc: t('nodeGatewayPage.exampleExportDesc'), cmd: curlCommand('POST', '/v1/reports/export-markdown', { date: '2025-01-15', content: '# Report', export_dir: '/path/to/dir' }) },
+              { cat: 'report', label: 'GET /v1/weekly-review', desc: t('nodeGatewayPage.exampleWeeklyReviewDesc'), cmd: curlCommand('GET', '/v1/weekly-review?date_from=2025-01-13&date_to=2025-01-19') },
+              { cat: 'timeline', label: 'GET /v1/timeline/:date', desc: t('nodeGatewayPage.exampleTimelineDesc'), cmd: curlCommand('GET', '/v1/timeline/2025-01-15') },
+              { cat: 'timeline', label: 'GET /v1/activities/:date', desc: t('nodeGatewayPage.exampleActivitiesDesc'), cmd: curlCommand('GET', '/v1/activities/2025-01-15') },
+              { cat: 'timeline', label: 'GET /v1/hourly-summaries/:date', desc: t('nodeGatewayPage.exampleHourlySummariesDesc'), cmd: curlCommand('GET', '/v1/hourly-summaries/2025-01-15') },
+              { cat: 'stats', label: 'GET /v1/stats/today', desc: t('nodeGatewayPage.exampleStatsTodayDesc'), cmd: curlCommand('GET', '/v1/stats/today') },
+              { cat: 'stats', label: 'GET /v1/stats/daily/:date', desc: t('nodeGatewayPage.exampleStatsDailyDesc'), cmd: curlCommand('GET', '/v1/stats/daily/2025-01-15') },
+              { cat: 'stats', label: 'GET /v1/stats/overview', desc: t('nodeGatewayPage.exampleStatsOverviewDesc'), cmd: curlCommand('GET', '/v1/stats/overview?mode=week&date=2025-01-17') },
+              { cat: 'stats', label: 'GET /v1/hourly-app-breakdown/:date', desc: t('nodeGatewayPage.exampleHourlyBreakdownDesc'), cmd: curlCommand('GET', '/v1/hourly-app-breakdown/2025-01-15') },
+              { cat: 'stats', label: 'GET /v1/apps/recent', desc: t('nodeGatewayPage.exampleAppsRecentDesc'), cmd: curlCommand('GET', '/v1/apps/recent') },
+              { cat: 'stats', label: 'GET /v1/apps/category-overview', desc: t('nodeGatewayPage.exampleAppsCategoryDesc'), cmd: curlCommand('GET', '/v1/apps/category-overview') },
+              { cat: 'stats', label: 'GET /v1/categories', desc: t('nodeGatewayPage.exampleCategoriesDesc'), cmd: curlCommand('GET', '/v1/categories') },
+              { cat: 'stats', label: 'GET /v1/categories/semantic', desc: t('nodeGatewayPage.exampleSemanticCategoriesDesc'), cmd: curlCommand('GET', '/v1/categories/semantic') },
             ] as example}
+              {#if activeApiCategory === 'all' || activeApiCategory === example.cat}
             <div class="flex items-start justify-between gap-2 rounded-lg bg-white/70 px-3 py-1.5 ring-1 ring-slate-200/70 dark:bg-slate-900/20 dark:ring-slate-700/70">
               <div class="min-w-0 flex-1">
                 <div class="flex items-center gap-2">
@@ -645,6 +679,7 @@
                 {t('nodeGatewayPage.copyCurl')}
               </button>
             </div>
+              {/if}
             {/each}
           </div>
           {/if}
