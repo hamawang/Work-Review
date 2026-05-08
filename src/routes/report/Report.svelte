@@ -34,9 +34,11 @@
   let dropdownStyle = '';
   let showPresetModal = false;
   let presetSaving = false;
+  $: activePresetName = (config?.daily_report_prompt_presets || []).find(p => p.prompt === config?.daily_report_custom_prompt)?.name || '';
   let editingPresetIndex = -1;
   let editingPresetName = '';
   let editingPresetPrompt = '';
+  let pendingDeletePreset = -1;
   let config = null;
   let lastLoadedDate = '';
   let reportRequestId = 0;
@@ -394,6 +396,7 @@
   if (!showPresetDropdown) return;
   if (!e.target.closest('[data-preset-dropdown]') && !e.target.closest('[data-preset-toggle]')) {
     showPresetDropdown = false;
+    pendingDeletePreset = -1;
   }
 }} />
 
@@ -495,64 +498,90 @@
           <button
             type="button"
             data-preset-toggle
-            class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-500 transition-colors"
+            class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:border-indigo-300 dark:hover:border-indigo-500 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
             on:click={(e) => {
               if (showPresetDropdown) {
                 showPresetDropdown = false;
                 return;
               }
               const rect = e.currentTarget.getBoundingClientRect();
-              dropdownStyle = `position:fixed;top:${rect.bottom + 6}px;right:${window.innerWidth - rect.right}px;width:220px;max-height:360px;`;
+              dropdownStyle = `position:fixed;top:${rect.bottom + 6}px;right:${window.innerWidth - rect.right}px;width:240px;max-height:320px;`;
               showPresetDropdown = true;
             }}
           >
-            <span class="truncate max-w-[140px]">{t('report.presetsTitle')}</span>
+            <span class="truncate max-w-[140px]">{activePresetName || t('report.presetsTitle')}</span>
             <svg class="w-3.5 h-3.5 transition-transform {showPresetDropdown ? 'rotate-180' : ''}" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/></svg>
           </button>
           {#if showPresetDropdown}
             <!-- svelte-ignore a11y-click-events-have-key-events -->
             <div use:portal data-preset-dropdown style={dropdownStyle} class="z-50 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 shadow-xl overscroll-contain" on:wheel={(e) => { e.stopPropagation(); e.preventDefault(); e.currentTarget.scrollTop += e.deltaY; }} on:touchmove|stopPropagation>
-              <div class="py-1">
+              <div class="py-1.5">
                 {#each (config?.daily_report_prompt_presets || []) as preset, i}
-                  <div class="flex items-center px-1">
-                    <button
-                      type="button"
-                      class="flex-1 text-left px-2.5 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors truncate"
-                      title={preset.prompt}
-                      on:click={() => {
-                        config.daily_report_custom_prompt = preset.prompt;
-                        persistReportPrompt();
-                        showPresetDropdown = false;
-                      }}
-                    >
-                      {preset.name}
-                    </button>
-                    <button
-                      type="button"
-                      class="p-1.5 text-slate-300 hover:text-rose-500 dark:text-slate-500 dark:hover:text-rose-400 rounded-md hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-colors shrink-0"
-                      title="删除"
-                      on:click|stopPropagation={async () => {
-                        config.daily_report_prompt_presets = config.daily_report_prompt_presets.filter((_, j) => j !== i);
-                        await savePresets();
-                      }}
-                    >
-                      <svg class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
-                    </button>
-                  </div>
-                {:else}
-                  <div class="px-3 py-3 text-xs text-slate-400 dark:text-slate-500 text-center">
-                    {t('report.presetNone')}
-                  </div>
+                  {#if pendingDeletePreset === i}
+                    <div class="flex flex-col items-center gap-1.5 px-3 py-2 bg-rose-50 dark:bg-rose-900/20 mx-2 rounded-lg">
+                      <span class="text-xs text-rose-600 dark:text-rose-400 text-center">{t('report.confirmDeletePreset', { name: preset.name })}</span>
+                      <div class="flex items-center gap-2">
+                        <button
+                          type="button"
+                          class="px-2.5 py-0.5 text-xs font-medium text-white bg-rose-500 hover:bg-rose-600 rounded-md transition-colors"
+                          on:click|stopPropagation={async () => {
+                            const wasActive = config.daily_report_custom_prompt === preset.prompt;
+                            config.daily_report_prompt_presets = config.daily_report_prompt_presets.filter((_, j) => j !== i);
+                            pendingDeletePreset = -1;
+                            if (wasActive) {
+                              config.daily_report_custom_prompt = '';
+                              persistReportPrompt();
+                            }
+                            await savePresets();
+                          }}
+                        >{t('common.confirm') || '确定'}</button>
+                        <button
+                          type="button"
+                          class="px-2.5 py-0.5 text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 rounded-md border border-slate-200 dark:border-slate-600 transition-colors"
+                          on:click|stopPropagation={() => { pendingDeletePreset = -1; }}
+                        >{t('common.cancel') || '取消'}</button>
+                      </div>
+                    </div>
+                  {:else}
+                    <div class="group flex items-center gap-1 mx-1.5 px-1.5 py-0.5 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
+                      {#if config.daily_report_custom_prompt === preset.prompt}
+                        <svg class="w-3.5 h-3.5 text-indigo-500 shrink-0" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+                      {:else}
+                        <div class="w-3.5 shrink-0"></div>
+                      {/if}
+                      <button
+                        type="button"
+                        class="flex-1 text-left px-1 py-1.5 text-sm text-slate-700 dark:text-slate-300 truncate transition-colors"
+                        title={preset.prompt}
+                        on:click={() => {
+                          config.daily_report_custom_prompt = preset.prompt;
+                          persistReportPrompt();
+                          showPresetDropdown = false;
+                        }}
+                      >
+                        {preset.name}
+                      </button>
+                      <button
+                        type="button"
+                        class="p-1 text-slate-300 hover:text-rose-500 dark:text-slate-600 dark:hover:text-rose-400 rounded-md hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-colors shrink-0 opacity-0 group-hover:opacity-100"
+                        title="删除"
+                        on:click|stopPropagation={() => { pendingDeletePreset = i; }}
+                      >
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+                      </button>
+                    </div>
+                  {/if}
                 {/each}
               </div>
               <div class="border-t border-slate-100 dark:border-slate-700">
                 <button
                   type="button"
-                  class="w-full text-left px-3 py-2.5 text-sm text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors flex items-center gap-1.5"
+                  class="w-full text-center px-3 py-2.5 text-sm text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors flex items-center justify-center gap-1.5"
                   on:click={() => {
                     editingPresetIndex = -1;
                     editingPresetName = '';
                     editingPresetPrompt = '';
+                    pendingDeletePreset = -1;
                     showPresetDropdown = false;
                     showPresetModal = true;
                   }}

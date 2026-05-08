@@ -134,7 +134,8 @@ Supported providers: Ollama (local) / OpenAI compatible / DeepSeek / Qwen / Zhip
 |------|--------|
 | macOS (Apple Silicon / Intel) | `.dmg` |
 | Windows | `.exe` |
-| Linux (X11 / Wayland) | `.deb` / `.AppImage` |
+| Linux x86_64 (X11 / Wayland) | `.deb` / `.AppImage` |
+| Linux ARM64 (aarch64) | `.deb` |
 
 **macOS:** Screenshots require the "Screen Recording" permission, and avatar linkage requires "Accessibility + Input Monitoring". If you see a "damaged" warning on first launch: `sudo xattr -rd com.apple.quarantine "/Applications/Work Review.app"`
 

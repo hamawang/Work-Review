@@ -599,6 +599,7 @@ export default {
       presetNamePlaceholder: 'Preset name',
       presetPromptPlaceholder: 'Enter prompt content…',
       addPreset: 'Add Preset',
+      confirmDeletePreset: 'Delete preset "{name}"?',
       currentReportLabel: 'Current Report',
       currentConfigLabel: 'Current Config',
       aiNotAppliedPrefix: 'AI inactive: ',
