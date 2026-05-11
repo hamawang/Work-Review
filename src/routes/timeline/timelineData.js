@@ -28,15 +28,20 @@ export function upsertTimelineActivity(currentActivities, newActivity) {
   // Match by GROUP BY key (app_name + browser_url/window_title) to avoid duplicates
   const newGroupKey = getActivityGroupKey(newActivity);
   const existingByGroup = currentActivities.findIndex(
-    (activity) => getActivityGroupKey(activity) === newGroupKey
+    (activity) => activity.id !== newActivity.id && getActivityGroupKey(activity) === newGroupKey
   );
   if (existingByGroup >= 0) {
+    // Update visual fields (timestamp, screenshot) but keep existing id and duration.
+    // The backend emits per-DB-row activities; duration accumulation here would be
+    // incorrect because the same group may span multiple DB rows that the initial
+    // DB query already aggregates. Later id-match replacements for the NEW row would
+    // also overwrite any accumulated total. Keeping the original id ensures subsequent
+    // real-time updates for the same group still match the correct entry.
     const existing = currentActivities[existingByGroup];
-    // Merge: accumulate duration so the cumulative time doesn't reset
-    // to the latest sample's tiny value when the backend emits a raw activity.
     const merged = {
-      ...newActivity,
-      duration: (existing.duration || 0) + (newActivity.duration || 0),
+      ...existing,
+      timestamp: newActivity.timestamp,
+      screenshot_path: newActivity.screenshot_path || existingActivity.screenshot_path,
     };
     return prepareTimelineActivities(
       currentActivities.map((activity, idx) =>

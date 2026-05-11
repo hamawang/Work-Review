@@ -4096,12 +4096,24 @@ pub(crate) fn get_saved_report_inner(
             apply_ignored_apps_to_stats(raw_stats, &ignored_apps),
             &excluded_domains,
         );
+        let category_name_overrides: std::collections::HashMap<String, String> = state
+            .config
+            .custom_categories
+            .iter()
+            .map(|c| (c.key.clone(), c.name.clone()))
+            .collect();
+        let semantic_name_overrides: std::collections::HashMap<String, String> = state
+            .config
+            .custom_semantic_categories
+            .iter()
+            .map(|c| (c.key.clone(), c.name.clone()))
+            .collect();
         report.content = crate::analysis::report_blocks::render_report_with_live_stats(
             &report.content,
             &live_stats,
             report_locale,
-            &std::collections::HashMap::new(),
-            &std::collections::HashMap::new(),
+            &category_name_overrides,
+            &semantic_name_overrides,
         );
     }
 
@@ -6720,8 +6732,7 @@ pub async fn delete_custom_category(
         next_config.custom_categories.retain(|c| c.key != key);
 
         // 记录已删除的内置分类 key，防止 seed 复活
-        const DEFAULT_KEYS: &[&str] = &["development", "browser", "communication", "office", "design", "entertainment", "other"];
-        if DEFAULT_KEYS.contains(&key.as_str())
+        if crate::config::DEFAULT_CATEGORY_KEYS.contains(&key.as_str())
             && !next_config.deleted_default_categories.contains(&key)
         {
             next_config.deleted_default_categories.push(key.clone());
@@ -6846,12 +6857,7 @@ pub async fn delete_custom_semantic_category(
             .retain(|c| c.key != key);
 
         // 记录已删除的内置语义分类 key，防止 seed 复活
-        const DEFAULT_SEMANTIC_KEYS: &[&str] = &[
-            "编码开发", "内容撰写", "资料阅读", "资料调研", "任务规划",
-            "设计创作", "AI 协作", "即时聊天", "会议沟通", "视频内容",
-            "音乐音频", "休息娱乐", "未知活动",
-        ];
-        if DEFAULT_SEMANTIC_KEYS.contains(&key.as_str())
+        if crate::config::DEFAULT_SEMANTIC_CATEGORY_KEYS.contains(&key.as_str())
             && !next_config.deleted_default_semantic_categories.contains(&key)
         {
             next_config.deleted_default_semantic_categories.push(key.clone());

@@ -636,7 +636,7 @@ fn advance_break_reminder(
 }
 
 const AVATAR_SWITCH_NUDGE_WINDOW_MS: u64 = 3 * 60 * 1000;
-const AVATAR_SWITCH_NUDGE_THRESHOLD: usize = 4;
+const AVATAR_SWITCH_NUDGE_THRESHOLD: usize = 8;
 const AVATAR_SWITCH_NUDGE_COOLDOWN_MS: u64 = 20 * 60 * 1000;
 const AVATAR_BACKLOG_NUDGE_COOLDOWN_MS: u64 = 90 * 60 * 1000;
 const AVATAR_BACKLOG_NUDGE_MIN_AGE_SECS: i64 = 30 * 60;
@@ -4033,11 +4033,17 @@ mod tests {
     fn 短时间频繁切换窗口时应触发主动提醒() {
         let mut runtime = AvatarNudgeRuntime::default();
 
+        // 需要 8 次切换才触发（阈值从 4 调整为 8）
         assert!(!record_avatar_window_switch(&mut runtime, 1_000));
+        assert!(!record_avatar_window_switch(&mut runtime, 20_000));
         assert!(!record_avatar_window_switch(&mut runtime, 40_000));
+        assert!(!record_avatar_window_switch(&mut runtime, 60_000));
         assert!(!record_avatar_window_switch(&mut runtime, 80_000));
-        assert!(record_avatar_window_switch(&mut runtime, 120_000));
-        assert!(!record_avatar_window_switch(&mut runtime, 125_000));
+        assert!(!record_avatar_window_switch(&mut runtime, 100_000));
+        assert!(!record_avatar_window_switch(&mut runtime, 120_000));
+        assert!(record_avatar_window_switch(&mut runtime, 140_000));
+        // 冷却期内不再触发
+        assert!(!record_avatar_window_switch(&mut runtime, 145_000));
     }
 
     #[test]

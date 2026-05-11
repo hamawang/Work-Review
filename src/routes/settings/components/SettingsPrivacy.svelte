@@ -15,6 +15,9 @@
   let selectedApp = '';
   let selectedLevel = 'ignored';
   let batchSelectedApps = new Set();
+  let appSearchQuery = '';
+  let showAllRecentApps = false;
+  let showAllRunningApps = false;
   let showKeywordInput = false;
   let newKeyword = '';
   let showDomainInput = false;
@@ -130,7 +133,7 @@
           {t('settingsPrivacy.appRules')}
         </span>
         <button
-          on:click={() => showAppInput = !showAppInput}
+          on:click={() => { const opening = !showAppInput; showAppInput = opening; if (opening) dispatch('refresh-apps'); appSearchQuery = ''; showAllRecentApps = false; showAllRunningApps = false; } }
           class="settings-link-action text-sm"
         >
           {showAppInput ? t('settingsPrivacy.collapse') : t('settingsPrivacy.addRule')}
@@ -175,11 +178,56 @@
           <!-- 快捷选择 -->
           {#if recentApps.length > 0 || runningApps.length > 0}
           <div class="settings-block">
+            <!-- 搜索过滤 -->
+            {#if recentApps.length + runningApps.length > 10}
+            <div class="mb-2">
+              <input
+                type="text"
+                bind:value={appSearchQuery}
+                class="control-input text-xs"
+                placeholder={t('settingsPrivacy.searchApps') || '搜索应用...'}
+              />
+            </div>
+            {/if}
+
+            {#if runningApps.length > 0}
+            <div class="mb-2">
+              <span class="settings-subtle block mb-1.5">{t('settingsPrivacy.runningApps')}</span>
+              <div class="flex flex-wrap gap-1.5">
+                {#each runningApps
+                  .filter(app => !appSearchQuery || app.toLowerCase().includes(appSearchQuery.toLowerCase()))
+                  .slice(0, showAllRunningApps ? undefined : 8) as app}
+                  <button
+                    on:click={() => toggleBatchApp(app)}
+                    class="settings-chip-button
+                           {batchSelectedApps.has(app)
+                             ? 'settings-chip-button-active'
+                             : ''}"
+                  >
+                    {batchSelectedApps.has(app) ? '✓ ' : ''}{app}
+                  </button>
+                {/each}
+              </div>
+              {#if runningApps.length > 8 && !appSearchQuery}
+                <button
+                  on:click={() => showAllRunningApps = !showAllRunningApps}
+                  class="text-xs text-primary-500 hover:text-primary-600 mt-1"
+                >
+                  {showAllRunningApps
+                    ? t('settingsPrivacy.collapse') || '收起'
+                    : `+${runningApps.length - 8} ${t('settingsPrivacy.moreApps') || '更多'}`}
+                </button>
+              {/if}
+            </div>
+            {/if}
+
             {#if recentApps.length > 0}
             <div>
               <span class="settings-subtle block mb-1.5">{t('settingsPrivacy.historyApps')}</span>
               <div class="flex flex-wrap gap-1.5">
-                {#each recentApps.slice(0, 12) as app}
+                {#each recentApps
+                  .filter(app => !appSearchQuery || app.toLowerCase().includes(appSearchQuery.toLowerCase()))
+                  .slice(0, showAllRecentApps ? undefined : 12) as app}
                   <button
                     on:click={() => toggleBatchApp(app)}
                     class="settings-chip-button
@@ -191,25 +239,16 @@
                   </button>
                 {/each}
               </div>
-            </div>
-            {/if}
-            
-            {#if runningApps.length > 0}
-            <div>
-              <span class="settings-subtle block mb-1.5">{t('settingsPrivacy.runningApps')}</span>
-              <div class="flex flex-wrap gap-1.5">
-                {#each runningApps.slice(0, 8) as app}
-                  <button
-                    on:click={() => toggleBatchApp(app)}
-                    class="settings-chip-button
-                           {batchSelectedApps.has(app)
-                             ? 'settings-chip-button-active'
-                             : ''}"
-                  >
-                    {batchSelectedApps.has(app) ? '✓ ' : ''}{app}
-                  </button>
-                {/each}
-              </div>
+              {#if recentApps.length > 12 && !appSearchQuery}
+                <button
+                  on:click={() => showAllRecentApps = !showAllRecentApps}
+                  class="text-xs text-primary-500 hover:text-primary-600 mt-1"
+                >
+                  {showAllRecentApps
+                    ? t('settingsPrivacy.collapse') || '收起'
+                    : `+${recentApps.length - 12} ${t('settingsPrivacy.moreApps') || '更多'}`}
+                </button>
+              {/if}
             </div>
             {/if}
           </div>
@@ -236,32 +275,36 @@
         </div>
       {/if}
 
-      <!-- 已有规则列表 -->
-      <div class="space-y-2">
-        {#each config.privacy.app_rules as rule, i}
-          <div class="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-700/30 rounded-lg group">
-            <div class="flex items-center gap-3">
-              <span class="text-sm font-medium text-slate-800 dark:text-white">{rule.app_name}</span>
-              {#if rule.level === 'full'}
-                <span class="settings-chip-success">{t('settingsPrivacy.full')}</span>
-              {:else if rule.level === 'anonymized'}
-                <span class="settings-chip-warn">{t('settingsPrivacy.anonymized')}</span>
-              {:else}
-                <span class="settings-chip-danger">{t('settingsPrivacy.ignored')}</span>
-              {/if}
-            </div>
-            <button
-              on:click={() => removeAppRule(i)}
-              class="text-xs text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
-            >
-              {t('settingsPrivacy.delete')}
-            </button>
-          </div>
-        {/each}
-        {#if config.privacy.app_rules.length === 0}
-          <p class="settings-empty">{t('settingsPrivacy.noRules')}</p>
-        {/if}
-      </div>
+      <!-- 已有规则列表：按隐私级别分组，chip 紧凑布局 -->
+      {#if config.privacy.app_rules.length > 0}
+        <div class="space-y-3">
+          {#each privacyLevels as level}
+            {@const groupRules = config.privacy.app_rules
+              .map((r, i) => ({ ...r, _idx: i }))
+              .filter(r => r.level === level.value)}
+            {#if groupRules.length > 0}
+              <div>
+                <span class="text-xs font-medium {level.textClass} mb-1 block">{level.label}</span>
+                <div class="flex flex-wrap gap-1.5">
+                  {#each groupRules as rule}
+                    <div class="settings-chip-neutral group">
+                      <span>{rule.app_name}</span>
+                      <button
+                        on:click={() => removeAppRule(rule._idx)}
+                        class="ml-1.5 text-slate-400 hover:text-red-500 opacity-50 group-hover:opacity-100 transition-opacity"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  {/each}
+                </div>
+              </div>
+            {/if}
+          {/each}
+        </div>
+      {:else}
+        <p class="settings-empty">{t('settingsPrivacy.noRules')}</p>
+      {/if}
     </div>
 
     <hr class="border-slate-200 dark:border-slate-700" />

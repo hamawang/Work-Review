@@ -878,13 +878,14 @@ impl AppConfig {
         self.migrate_legacy_config();
         normalize_custom_categories(&mut self.custom_categories);
         normalize_app_category_rules(&mut self.app_category_rules, &self.custom_categories);
+        // Seed defaults BEFORE rule validation so built-in categories are present
+        seed_default_categories(&mut self.custom_categories, &self.deleted_default_categories);
+        seed_default_semantic_categories(&mut self.custom_semantic_categories, &self.deleted_default_semantic_categories);
+        normalize_custom_semantic_categories(&mut self.custom_semantic_categories);
         normalize_website_semantic_rules(
             &mut self.website_semantic_rules,
             &self.custom_semantic_categories,
         );
-        normalize_custom_semantic_categories(&mut self.custom_semantic_categories);
-        seed_default_categories(&mut self.custom_categories, &self.deleted_default_categories);
-        seed_default_semantic_categories(&mut self.custom_semantic_categories, &self.deleted_default_semantic_categories);
         self.screenshot_interval = normalize_screenshot_interval(self.screenshot_interval);
         self.idle_threshold_minutes = normalize_idle_threshold_minutes(self.idle_threshold_minutes);
         self.avatar_scale = normalize_avatar_scale(self.avatar_scale);
@@ -1210,6 +1211,34 @@ fn normalize_custom_semantic_categories(categories: &mut Vec<CustomSemanticCateg
         seen.insert(key.to_string())
     });
 }
+
+/// 内置应用分类 key 列表（统一维护点）
+pub const DEFAULT_CATEGORY_KEYS: &[&str] = &[
+    "development",
+    "browser",
+    "communication",
+    "office",
+    "design",
+    "entertainment",
+    "other",
+];
+
+/// 内置语义分类 key 列表（统一维护点）
+pub const DEFAULT_SEMANTIC_CATEGORY_KEYS: &[&str] = &[
+    "编码开发",
+    "内容撰写",
+    "资料阅读",
+    "资料调研",
+    "任务规划",
+    "设计创作",
+    "AI 协作",
+    "即时聊天",
+    "会议沟通",
+    "视频内容",
+    "音乐音频",
+    "休息娱乐",
+    "未知活动",
+];
 
 fn seed_default_categories(categories: &mut Vec<CustomCategory>, deleted: &[String]) {
     let defaults: Vec<(&str, &str, &str, &str)> = vec![

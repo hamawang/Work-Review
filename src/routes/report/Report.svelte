@@ -390,6 +390,15 @@
   onMount(() => {
     loadConfig();
   });
+
+  // 页面重新获得焦点时刷新配置，确保 AI 增强状态为最新
+  let configRefreshTimer = 0;
+  function refreshConfigOnFocus() {
+    const now = Date.now();
+    if (now - configRefreshTimer < 2000) return;
+    configRefreshTimer = now;
+    loadConfig();
+  }
 </script>
 
 <svelte:window on:click={(e) => {
@@ -398,6 +407,8 @@
     showPresetDropdown = false;
     pendingDeletePreset = -1;
   }
+}} on:focusin={refreshConfigOnFocus} on:visibilitychange={() => {
+  if (document.visibilityState === 'visible') refreshConfigOnFocus();
 }} />
 
 <div class="page-shell report-editorial-shell" data-locale={currentLocale}>

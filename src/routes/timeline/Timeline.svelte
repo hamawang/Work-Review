@@ -227,6 +227,97 @@
     }
   }
 
+  // 隐私规则快捷设置
+  let privacySaving = false;
+  let pendingPrivacyRule = null; // { level, levelLabel }
+
+  function getCurrentPrivacyLevel(appName) {
+    return selectedActivity?._privacyLevel || 'full';
+  }
+
+  function requestPrivacyRule(level) {
+    if (!selectedActivity || privacySaving) return;
+    if (getCurrentPrivacyLevel() === level) return;
+    const levelLabels = {
+      full: t('timeline.detail.privacyFull'),
+      anonymized: t('timeline.detail.privacyAnonymized'),
+      ignored: t('timeline.detail.privacyIgnored'),
+    };
+    pendingPrivacyRule = { level, levelLabel: levelLabels[level] };
+  }
+
+  function cancelPrivacyRule() { pendingPrivacyRule = null; }
+
+  async function confirmPrivacyRule() {
+    if (!pendingPrivacyRule || !selectedActivity) return;
+    const { level } = pendingPrivacyRule;
+    pendingPrivacyRule = null;
+    privacySaving = true;
+    try {
+      const config = await invoke('get_config');
+      if (!config.privacy) config.privacy = {};
+      if (!config.privacy.app_rules) config.privacy.app_rules = [];
+
+      if (level === 'full') {
+        config.privacy.app_rules = config.privacy.app_rules.filter(
+          r => r.app_name !== selectedActivity.app_name
+        );
+      } else {
+        const idx = config.privacy.app_rules.findIndex(
+          r => r.app_name === selectedActivity.app_name
+        );
+        if (idx >= 0) {
+          config.privacy.app_rules[idx].level = level;
+        } else {
+          config.privacy.app_rules.push({ app_name: selectedActivity.app_name, level });
+        }
+      }
+
+      await invoke('save_config', { config });
+
+      selectedActivity = { ...selectedActivity, _privacyLevel: level };
+      cache.invalidate('overview');
+
+      const levelLabels = {
+        full: t('timeline.detail.privacyFull'),
+        anonymized: t('timeline.detail.privacyAnonymized'),
+        ignored: t('timeline.detail.privacyIgnored'),
+      };
+      showToast(
+        t('timeline.detail.privacySetSuccess', {
+          appName: selectedActivity.app_name,
+          level: levelLabels[level],
+        }),
+        'success'
+      );
+
+      if (level === 'ignored') {
+        closeDetail();
+        loadTimeline();
+      }
+    } catch (e) {
+      console.error('设置记录策略失败:', e);
+      showToast(
+        t('timeline.detail.privacySetFailed', { error: e }),
+        'error'
+      );
+    } finally {
+      privacySaving = false;
+    }
+  }
+
+  // 打开详情时加载当前隐私级别
+  async function loadPrivacyLevel(activity) {
+    try {
+      const config = await invoke('get_config');
+      const rules = config.privacy?.app_rules || [];
+      const rule = rules.find(r => r.app_name === activity.app_name);
+      return rule ? rule.level : 'full';
+    } catch {
+      return 'full';
+    }
+  }
+
   const CATEGORY_EMOJIS = [
     '💻', '🌐', '💬', '📝', '🎨', '🎮', '📁',
     '⚡', '📊', '🔧', '🛠️', '💡', '🎯', '📌',
@@ -616,7 +707,7 @@
       ? loadFullImage(activity.screenshot_path)
       : Promise.resolve(previewThumbnail);
 
-    const [freshActivity, thumbnail] = await Promise.all([freshActivityPromise, fullImagePromise]);
+    const [freshActivity, thumbnail, privacyLevel] = await Promise.all([freshActivityPromise, fullImagePromise, loadPrivacyLevel(activity)]);
     if (requestId !== viewActivityRequestId) return;
 
     const resolvedActivity = freshActivity || activity;
@@ -625,6 +716,7 @@
       ...resolvedActivity,
       thumbnail: thumbnail || previewThumbnail,
       thumbnailLoading: false,
+      _privacyLevel: privacyLevel,
     };
   }
 
@@ -1148,6 +1240,45 @@
           {/if}
         </div>
 
+        <!-- 记录策略快捷设置 -->
+        <div>
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <span class="text-sm font-medium text-slate-500 dark:text-slate-400">{t('timeline.detail.privacyRule')}</span>
+              <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                {t('timeline.detail.privacyRuleHelp')}
+              </p>
+            </div>
+            {#if privacySaving}
+              <span class="text-xs text-slate-400">{t('timeline.detail.saving')}</span>
+            {/if}
+          </div>
+          <div class="mt-3 flex rounded-lg overflow-hidden border border-slate-200 dark:border-slate-600">
+            {#each [
+              { value: 'full', label: t('timeline.detail.privacyFull'), activeClass: 'settings-segment-success' },
+              { value: 'anonymized', label: t('timeline.detail.privacyAnonymized'), activeClass: 'settings-segment-warn' },
+              { value: 'ignored', label: t('timeline.detail.privacyIgnored'), activeClass: 'settings-segment-danger' },
+            ] as opt}
+              <button
+                on:click={() => requestPrivacyRule(opt.value)}
+                class="segment-btn flex-1 text-center {(selectedActivity._privacyLevel || 'full') === opt.value ? opt.activeClass : 'settings-segment-idle'}"
+                disabled={privacySaving}
+              >
+                {opt.label}
+              </button>
+            {/each}
+          </div>
+          <p class="text-xs mt-1.5 {[
+            { full: 'settings-text-success', anonymized: 'settings-text-warn', ignored: 'settings-text-danger' }
+          ][0][(selectedActivity._privacyLevel || 'full')] || 'settings-subtle'}">
+            {{
+              full: t('settingsPrivacy.fullDesc'),
+              anonymized: t('settingsPrivacy.anonymizedDesc'),
+              ignored: t('settingsPrivacy.ignoredDesc'),
+            }[(selectedActivity._privacyLevel || 'full')] || ''}
+          </p>
+        </div>
+
         <!-- 截图预览 -->
         <div>
           <span class="text-sm font-medium text-slate-500 dark:text-slate-400">{t('timeline.detail.screenshot')}</span>
@@ -1203,11 +1334,12 @@
 {/if}
 
 <!-- 分类修改确认（页面顶层，z-index 高于详情弹窗 z-[140]） -->
-{#if selectedActivity && (pendingChangeCategory || pendingApplyCategory || pendingDeleteCategory)}
+{#if selectedActivity && (pendingChangeCategory || pendingApplyCategory || pendingDeleteCategory || pendingPrivacyRule)}
   {@const isApply = !!pendingApplyCategory}
   {@const isDelete = !!pendingDeleteCategory}
-  {@const confirmAction = isDelete ? confirmDeleteCategory : (isApply ? confirmApplyCategory : confirmChangeCategory)}
-  {@const cancelAction = isDelete ? cancelDeleteCategory : (isApply ? cancelApplyCategory : cancelChangeCategory)}
+  {@const isPrivacy = !!pendingPrivacyRule}
+  {@const confirmAction = isDelete ? confirmDeleteCategory : (isApply ? confirmApplyCategory : (isPrivacy ? confirmPrivacyRule : confirmChangeCategory))}
+  {@const cancelAction = isDelete ? cancelDeleteCategory : (isApply ? cancelApplyCategory : (isPrivacy ? cancelPrivacyRule : cancelChangeCategory))}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <div
@@ -1235,6 +1367,28 @@
             class="px-4 py-2 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700"
           >
             {t('timeline.confirmDelete')}
+          </button>
+        </div>
+      {:else if isPrivacy}
+        <h3 class="text-base font-semibold text-slate-800 dark:text-white">{t('timeline.detail.privacyRule')}</h3>
+        <p class="mt-2 text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
+          {t('timeline.detail.privacyConfirmMessage', {
+            appName: selectedActivity.app_name,
+            level: pendingPrivacyRule.levelLabel,
+          })}
+        </p>
+        <div class="mt-5 flex justify-end gap-2">
+          <button
+            on:click={cancelAction}
+            class="px-4 py-2 text-sm rounded-lg text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 border border-slate-200 dark:border-slate-700"
+          >
+            {t('timeline.cancel')}
+          </button>
+          <button
+            on:click={confirmAction}
+            class="px-4 py-2 text-sm rounded-lg bg-primary-600 text-white hover:bg-primary-700"
+          >
+            {t('timeline.confirmChange')}
           </button>
         </div>
       {:else}

@@ -380,6 +380,7 @@
             {runningApps}
             {recentApps}
             on:change={() => dirty = true}
+            on:refresh-apps={() => { loadRunningApps(); loadRecentApps(); }}
           />
         {:else if activeTab === 'storage'}
           <SettingsStorage
