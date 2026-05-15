@@ -218,6 +218,7 @@ export default {
       sponsorship: '贊助支持',
       checkUpdates: '檢查更新',
       checkingUpdates: '檢查中...',
+      autoCheckUpdate: '啟動時自動檢查更新',
       loadingDataDir: '讀取中...',
       dataDirTitle: '本地資料目錄',
       dataDirSubtitle: 'Local Storage',

@@ -218,6 +218,7 @@ export default {
       sponsorship: 'Support',
       checkUpdates: 'Check for Updates',
       checkingUpdates: 'Checking...',
+      autoCheckUpdate: 'Auto-check updates on startup',
       loadingDataDir: 'Loading...',
       dataDirTitle: 'Local Data Folder',
       dataDirSubtitle: 'Local Storage',

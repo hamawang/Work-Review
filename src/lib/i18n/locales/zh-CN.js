@@ -218,6 +218,7 @@ export default {
       sponsorship: '赞助支持',
       checkUpdates: '检查更新',
       checkingUpdates: '检查中...',
+      autoCheckUpdate: '启动时自动检查更新',
       loadingDataDir: '读取中...',
       dataDirTitle: '本地数据目录',
       dataDirSubtitle: 'Local Storage',

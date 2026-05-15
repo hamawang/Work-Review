@@ -1253,7 +1253,7 @@
               <span class="text-xs text-slate-400">{t('timeline.detail.saving')}</span>
             {/if}
           </div>
-          <div class="mt-3 flex rounded-lg overflow-hidden border border-slate-200 dark:border-slate-600">
+          <div class="mt-3 flex gap-2">
             {#each [
               { value: 'full', label: t('timeline.detail.privacyFull'), activeClass: 'settings-segment-success' },
               { value: 'anonymized', label: t('timeline.detail.privacyAnonymized'), activeClass: 'settings-segment-warn' },
@@ -1261,7 +1261,7 @@
             ] as opt}
               <button
                 on:click={() => requestPrivacyRule(opt.value)}
-                class="segment-btn flex-1 text-center {(selectedActivity._privacyLevel || 'full') === opt.value ? opt.activeClass : 'settings-segment-idle'}"
+                class="segment-btn flex-1 text-center border border-slate-200 dark:border-slate-600 rounded-lg {(selectedActivity._privacyLevel || 'full') === opt.value ? opt.activeClass : 'settings-segment-idle'}"
                 disabled={privacySaving}
               >
                 {opt.label}

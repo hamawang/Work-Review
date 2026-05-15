@@ -12,6 +12,7 @@
 
   let appVersion = '';
   let isCheckingUpdate = false;
+  let autoCheckUpdate = true;
   let isSponsorshipOpen = false;
   let zoomedQr = null;
   let updateStatus = '';
@@ -21,11 +22,25 @@
   onMount(async () => {
     try {
       appVersion = await getVersion();
+      const settings = await invoke('get_update_settings');
+      autoCheckUpdate = settings.auto_check ?? true;
     } catch (e) {
       console.error('初始化失败:', e);
       appVersion = '1.0.0';
     }
   });
+
+  async function toggleAutoCheck() {
+    autoCheckUpdate = !autoCheckUpdate;
+    try {
+      const settings = await invoke('get_update_settings');
+      settings.auto_check = autoCheckUpdate;
+      await invoke('save_update_settings', { settings });
+    } catch (e) {
+      console.error('保存更新设置失败:', e);
+      autoCheckUpdate = !autoCheckUpdate;
+    }
+  }
 
   async function openGitHub() {
     await open('https://github.com/wm94i/Work_Review');
@@ -119,7 +134,7 @@
           </button>
         </div>
 
-        <div class="flex justify-center">
+        <div class="flex flex-col items-center gap-3">
           <button
             on:click={checkForUpdates}
             disabled={isCheckingUpdate}
@@ -136,6 +151,18 @@
               <span class="leading-none">{t('about.checkUpdates')}</span>
             {/if}
           </button>
+          <label class="flex items-center gap-2 cursor-pointer select-none">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={autoCheckUpdate}
+              on:click={toggleAutoCheck}
+              class="relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors duration-200 {autoCheckUpdate ? 'bg-blue-500' : 'bg-slate-300 dark:bg-slate-600'}"
+            >
+              <span class="pointer-events-none inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm ring-0 transition-transform duration-200 {autoCheckUpdate ? 'translate-x-[18px]' : 'translate-x-[3px]'}"></span>
+            </button>
+            <span class="text-xs text-slate-500 dark:text-slate-400">{t('about.autoCheckUpdate')}</span>
+          </label>
         </div>
       </div>
     </section>
