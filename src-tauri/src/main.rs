@@ -25,6 +25,7 @@ mod node_gateway;
 mod ocr;
 mod ocr_logger;
 mod privacy;
+mod remote_upload;
 mod screen_lock;
 mod screenshot;
 mod storage;
@@ -2046,6 +2047,7 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                         executable_path: active_window.executable_path,
                         semantic_category: Some(classification.semantic_category),
                         semantic_confidence: Some(i32::from(classification.confidence)),
+                        screenshot_url: None,
                     };
 
                     // 短暂获取锁写入数据库
@@ -2340,6 +2342,7 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                         executable_path: active_window.executable_path,
                         semantic_category: Some(classification.semantic_category.clone()),
                         semantic_confidence: Some(i32::from(classification.confidence)),
+                        screenshot_url: None,
                     })
                 } else {
                     // === 新建路径：正常截屏并保存 ===
@@ -2433,6 +2436,7 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                                         classification.semantic_category.clone(),
                                     ),
                                     semantic_confidence: Some(i32::from(classification.confidence)),
+                                    screenshot_url: None,
                                 };
 
                                 let inserted = {
@@ -2500,6 +2504,31 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                                             }
                                         });
 
+                                        // 异步远程上传截图
+                                        {
+                                            let remote_cfg = {
+                                                let g = state.lock().unwrap_or_else(|e| e.into_inner());
+                                                g.config.remote_storage.clone()
+                                            };
+                                            if remote_cfg.provider != work_review_core::config::RemoteStorageProvider::None {
+                                                let st = state.clone();
+                                                let ap = archive_path.clone();
+                                                let rp = relative_path.clone();
+                                                tokio::spawn(async move {
+                                                    let client = reqwest::Client::new();
+                                                    match remote_upload::upload_screenshot(&client, &remote_cfg, &ap, &rp).await {
+                                                        Ok(url) => {
+                                                            log::info!("远程上传成功: {url}");
+                                                            if let Ok(g) = st.lock() {
+                                                                let _ = g.database.update_activity_screenshot_url(activity_id, &url);
+                                                            }
+                                                        }
+                                                        Err(e) => log::warn!("远程上传失败: {e}"),
+                                                    }
+                                                });
+                                            }
+                                        }
+
                                         Some(database::Activity {
                                             id: Some(activity_id),
                                             ..activity
@@ -2560,6 +2589,7 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                             executable_path: active_window.executable_path,
                             semantic_category: Some(classification.semantic_category.clone()),
                             semantic_confidence: Some(i32::from(classification.confidence)),
+                            screenshot_url: None,
                         };
 
                         let inserted = {
@@ -2695,6 +2725,7 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                     executable_path: ow.executable_path.clone(),
                     semantic_category: Some(classification.semantic_category),
                     semantic_confidence: Some(i32::from(classification.confidence)),
+                    screenshot_url: None,
                 };
 
                 let state_guard = state.lock().unwrap_or_else(|e| e.into_inner());
@@ -3339,6 +3370,7 @@ async fn main() {
             commands::open_data_dir,
             commands::get_screenshot_thumbnail,
             commands::get_screenshot_full,
+            commands::test_remote_storage,
             commands::take_screenshot,
             commands::test_ai_model,
             commands::test_model,

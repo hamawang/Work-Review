@@ -58,6 +58,11 @@ tauri-plugin-updater = "2.10.0"
 tauri-plugin-process = "2.3.1"
 auto-launch = "0.6.0"
 
+# S3 SigV4 签名
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+
 # 平台特定依赖 - Windows
 [target.'cfg(windows)'.dependencies]
 windows-capture = "1.5"

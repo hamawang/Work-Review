@@ -55,6 +55,9 @@ pub struct Activity {
     /// 语义分类置信度（0-100）
     #[serde(default)]
     pub semantic_confidence: Option<i32>,
+    /// 远程截图 URL（上传成功后填充）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub screenshot_url: Option<String>,
 }
 
 /// 每日报告
@@ -526,6 +529,11 @@ impl Database {
             "ALTER TABLE activities ADD COLUMN semantic_confidence INTEGER",
             [],
         );
+        // 迁移：添加 screenshot_url 列（远程存储 URL）
+        let _ = conn.execute(
+            "ALTER TABLE activities ADD COLUMN screenshot_url TEXT",
+            [],
+        );
 
         // === FTS5 全文检索索引 ===
         // activities FTS: 索引窗口标题、OCR 文本、应用名、浏览器 URL
@@ -641,8 +649,8 @@ impl Database {
             .filter(|url| !url.is_empty());
 
         conn.execute(
-            "INSERT INTO activities (timestamp, app_name, window_title, screenshot_path, ocr_text, category, duration, browser_url, executable_path, semantic_category, semantic_confidence)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            "INSERT INTO activities (timestamp, app_name, window_title, screenshot_path, ocr_text, category, duration, browser_url, executable_path, semantic_category, semantic_confidence, screenshot_url)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 activity.timestamp,
                 activity.app_name,
@@ -655,6 +663,7 @@ impl Database {
                 activity.executable_path,
                 activity.semantic_category,
                 activity.semantic_confidence,
+                activity.screenshot_url,
             ],
         )?;
 
@@ -693,6 +702,7 @@ impl Database {
                 executable_path: row.get(9)?,
                 semantic_category: row.get(10)?,
                 semantic_confidence: row.get(11)?,
+                screenshot_url: None,
             }))
         } else {
             Ok(None)
@@ -735,6 +745,7 @@ impl Database {
                 executable_path: row.get(9)?,
                 semantic_category: row.get(10)?,
                 semantic_confidence: row.get(11)?,
+                screenshot_url: None,
             }))
         } else {
             Ok(None)
@@ -781,6 +792,7 @@ impl Database {
                 executable_path: row.get(9)?,
                 semantic_category: row.get(10)?,
                 semantic_confidence: row.get(11)?,
+                screenshot_url: None,
             }))
         } else {
             Ok(None)
@@ -828,6 +840,7 @@ impl Database {
                 executable_path: row.get(9)?,
                 semantic_category: row.get(10)?,
                 semantic_confidence: row.get(11)?,
+                screenshot_url: None,
             }))
         } else {
             Ok(None)
@@ -860,6 +873,7 @@ impl Database {
                 executable_path: row.get(9)?,
                 semantic_category: row.get(10)?,
                 semantic_confidence: row.get(11)?,
+                screenshot_url: None,
             }))
         } else {
             Ok(None)
@@ -936,6 +950,20 @@ impl Database {
         conn.execute(
             "UPDATE activities SET ocr_text = ?1 WHERE id = ?2",
             params![ocr_text, id],
+        )?;
+
+        Ok(())
+    }
+
+    /// 更新活动的远程截图 URL（远程上传成功后调用）
+    pub fn update_activity_screenshot_url(&self, id: i64, url: &str) -> Result<()> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+
+        conn.execute(
+            "UPDATE activities SET screenshot_url = ?1 WHERE id = ?2",
+            params![url, id],
         )?;
 
         Ok(())
@@ -1532,6 +1560,7 @@ impl Database {
                     executable_path,
                     semantic_category,
                     semantic_confidence,
+                    screenshot_url,
                     ROW_NUMBER() OVER (
                         PARTITION BY
                             app_name,
@@ -1564,7 +1593,8 @@ impl Database {
                 browser_url,
                 executable_path,
                 semantic_category,
-                semantic_confidence
+                semantic_confidence,
+                screenshot_url
              FROM ranked
              WHERE rn = 1
              ORDER BY timestamp DESC, id DESC
@@ -1591,6 +1621,7 @@ impl Database {
                     executable_path: row.get(9)?,
                     semantic_category: row.get(10)?,
                     semantic_confidence: row.get(11)?,
+                    screenshot_url: row.get(12)?,
                 })
             })?
             .filter_map(|r| r.ok())
@@ -1689,6 +1720,7 @@ impl Database {
                     executable_path: row.get(9)?,
                     semantic_category: row.get(10)?,
                     semantic_confidence: row.get(11)?,
+                    screenshot_url: None,
                 })
             })?
             .filter_map(|row| row.ok())
@@ -1859,6 +1891,7 @@ impl Database {
                     executable_path: row.get(9)?,
                     semantic_category: row.get(10)?,
                     semantic_confidence: row.get(11)?,
+                    screenshot_url: None,
                 })
             })?
             .filter_map(|r| r.ok())
@@ -2039,6 +2072,7 @@ impl Database {
                     executable_path: row.get(9)?,
                     semantic_category: row.get(10)?,
                     semantic_confidence: row.get(11)?,
+                    screenshot_url: None,
                 })
             })?
             .filter_map(|row| row.ok())
@@ -2083,6 +2117,7 @@ impl Database {
                     executable_path: row.get(9)?,
                     semantic_category: row.get(10)?,
                     semantic_confidence: row.get(11)?,
+                    screenshot_url: None,
                 })
             })?
             .filter_map(|row| row.ok())
@@ -2658,6 +2693,7 @@ mod tests {
                 executable_path: None,
                 semantic_category: None,
                 semantic_confidence: None,
+                screenshot_url: None,
             },
             Activity {
                 id: None,
@@ -2672,6 +2708,7 @@ mod tests {
                 executable_path: None,
                 semantic_category: None,
                 semantic_confidence: None,
+                screenshot_url: None,
             },
             Activity {
                 id: None,
@@ -2686,6 +2723,7 @@ mod tests {
                 executable_path: None,
                 semantic_category: None,
                 semantic_confidence: None,
+                screenshot_url: None,
             },
         ];
 
@@ -2731,6 +2769,7 @@ mod tests {
             executable_path: None,
             semantic_category: None,
             semantic_confidence: None,
+            screenshot_url: None,
         };
 
         let inserted_id = db.insert_activity(&activity).expect("插入测试数据失败");
@@ -2771,6 +2810,7 @@ mod tests {
                 executable_path: None,
                 semantic_category: None,
                 semantic_confidence: None,
+                screenshot_url: None,
             },
             Activity {
                 id: None,
@@ -2785,6 +2825,7 @@ mod tests {
                 executable_path: None,
                 semantic_category: None,
                 semantic_confidence: None,
+                screenshot_url: None,
             },
             Activity {
                 id: None,
@@ -2799,6 +2840,7 @@ mod tests {
                 executable_path: None,
                 semantic_category: None,
                 semantic_confidence: None,
+                screenshot_url: None,
             },
         ];
 
@@ -2851,6 +2893,7 @@ mod tests {
                 executable_path: None,
                 semantic_category: None,
                 semantic_confidence: None,
+                screenshot_url: None,
             },
             Activity {
                 id: None,
@@ -2865,6 +2908,7 @@ mod tests {
                 executable_path: None,
                 semantic_category: Some("资料阅读".to_string()),
                 semantic_confidence: Some(80),
+                screenshot_url: None,
             },
         ];
 
@@ -2916,6 +2960,7 @@ mod tests {
                 executable_path: None,
                 semantic_category: Some("资料阅读".to_string()),
                 semantic_confidence: Some(80),
+                screenshot_url: None,
             },
             Activity {
                 id: None,
@@ -2930,6 +2975,7 @@ mod tests {
                 executable_path: None,
                 semantic_category: Some("资料阅读".to_string()),
                 semantic_confidence: Some(80),
+                screenshot_url: None,
             },
         ];
 
@@ -2984,6 +3030,7 @@ mod tests {
                 executable_path: Some("/Applications/Mail.app/Contents/MacOS/Mail".to_string()),
                 semantic_category: None,
                 semantic_confidence: None,
+                screenshot_url: None,
             },
             Activity {
                 id: None,
@@ -2998,6 +3045,7 @@ mod tests {
                 executable_path: None,
                 semantic_category: None,
                 semantic_confidence: None,
+                screenshot_url: None,
             },
         ];
 
@@ -3043,6 +3091,7 @@ mod tests {
                 executable_path: None,
                 semantic_category: Some("资料阅读".to_string()),
                 semantic_confidence: Some(80),
+                screenshot_url: None,
             },
             Activity {
                 id: None,
@@ -3057,6 +3106,7 @@ mod tests {
                 executable_path: None,
                 semantic_category: Some("即时聊天".to_string()),
                 semantic_confidence: Some(80),
+                screenshot_url: None,
             },
         ];
 
@@ -3092,6 +3142,7 @@ mod tests {
             executable_path: None,
             semantic_category: Some("资料阅读".to_string()),
             semantic_confidence: Some(80),
+            screenshot_url: None,
         };
 
         db.insert_activity(&activity).expect("插入测试数据失败");
@@ -3130,6 +3181,7 @@ mod tests {
             executable_path: None,
             semantic_category: None,
             semantic_confidence: None,
+            screenshot_url: None,
         };
 
         db.insert_activity(&activity).expect("插入测试数据失败");
@@ -3163,6 +3215,7 @@ mod tests {
             executable_path: None,
             semantic_category: None,
             semantic_confidence: None,
+            screenshot_url: None,
         };
 
         db.insert_activity(&activity).expect("插入测试数据失败");
@@ -3196,6 +3249,7 @@ mod tests {
             executable_path: None,
             semantic_category: None,
             semantic_confidence: None,
+            screenshot_url: None,
         };
 
         db.insert_activity(&activity).expect("插入测试数据失败");
@@ -3230,6 +3284,7 @@ mod tests {
                 executable_path: None,
                 semantic_category: None,
                 semantic_confidence: None,
+                screenshot_url: None,
             },
             Activity {
                 id: None,
@@ -3244,6 +3299,7 @@ mod tests {
                 executable_path: None,
                 semantic_category: None,
                 semantic_confidence: None,
+                screenshot_url: None,
             },
         ];
 
@@ -3281,6 +3337,7 @@ mod tests {
                 executable_path: None,
                 semantic_category: Some("休息娱乐".to_string()),
                 semantic_confidence: Some(100),
+                screenshot_url: None,
             },
             Activity {
                 id: None,
@@ -3295,6 +3352,7 @@ mod tests {
                 executable_path: None,
                 semantic_category: Some("编码开发".to_string()),
                 semantic_confidence: Some(100),
+                screenshot_url: None,
             },
         ];
 
@@ -3335,6 +3393,7 @@ mod tests {
                 ),
                 semantic_category: None,
                 semantic_confidence: None,
+                screenshot_url: None,
             },
             Activity {
                 id: None,
@@ -3349,6 +3408,7 @@ mod tests {
                 executable_path: Some(r"D:\Portable\Code\Code.exe".to_string()),
                 semantic_category: None,
                 semantic_confidence: None,
+                screenshot_url: None,
             },
         ];
 
@@ -3389,6 +3449,7 @@ mod tests {
             semantic_category: Some("资料阅读".to_string()),
             semantic_confidence: Some(86),
             executable_path: None,
+            screenshot_url: None,
         };
 
         db.insert_activity(&activity).expect("插入测试数据失败");
@@ -3424,6 +3485,7 @@ mod tests {
                 executable_path: None,
                 semantic_category: Some("设计创作".to_string()),
                 semantic_confidence: Some(75),
+                screenshot_url: None,
             },
             Activity {
                 id: None,
@@ -3438,6 +3500,7 @@ mod tests {
                 executable_path: None,
                 semantic_category: Some("设计创作".to_string()),
                 semantic_confidence: Some(70),
+                screenshot_url: None,
             },
         ];
 
@@ -3497,6 +3560,7 @@ mod tests {
                 executable_path: None,
                 semantic_category: Some("编码开发".to_string()),
                 semantic_confidence: Some(82),
+                screenshot_url: None,
             },
             Activity {
                 id: None,
@@ -3511,6 +3575,7 @@ mod tests {
                 executable_path: None,
                 semantic_category: Some("编码开发".to_string()),
                 semantic_confidence: Some(80),
+                screenshot_url: None,
             },
             Activity {
                 id: None,
@@ -3525,6 +3590,7 @@ mod tests {
                 executable_path: None,
                 semantic_category: Some("资料阅读".to_string()),
                 semantic_confidence: Some(76),
+                screenshot_url: None,
             },
         ];
 
@@ -3619,6 +3685,7 @@ mod tests {
             ),
             semantic_category: Some("编码开发".to_string()),
             semantic_confidence: Some(88),
+            screenshot_url: None,
         })
         .expect("插入活动失败");
 
