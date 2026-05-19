@@ -525,6 +525,66 @@ impl Default for StorageConfig {
     }
 }
 
+/// 远程存储提供商
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum RemoteStorageProvider {
+    #[default]
+    None,
+    S3,
+    #[serde(rename = "webdav")]
+    WebDav,
+}
+
+/// S3 兼容存储（MinIO）配置
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct S3Config {
+    #[serde(default)]
+    pub endpoint: String,
+    #[serde(default)]
+    pub bucket: String,
+    #[serde(default)]
+    pub access_key: String,
+    #[serde(default)]
+    pub secret_key: String,
+    #[serde(default = "default_s3_region")]
+    pub region: String,
+    #[serde(default)]
+    pub path_prefix: String,
+    #[serde(default)]
+    pub public_url_base: Option<String>,
+}
+
+fn default_s3_region() -> String {
+    "us-east-1".to_string()
+}
+
+/// WebDAV 存储配置
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct WebDavConfig {
+    #[serde(default)]
+    pub url: String,
+    #[serde(default)]
+    pub username: String,
+    #[serde(default)]
+    pub password: String,
+    #[serde(default)]
+    pub path_prefix: String,
+    #[serde(default)]
+    pub public_url_base: Option<String>,
+}
+
+/// 远程存储配置
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct RemoteStorageConfig {
+    #[serde(default)]
+    pub provider: RemoteStorageProvider,
+    #[serde(default)]
+    pub s3: S3Config,
+    #[serde(default)]
+    pub webdav: WebDavConfig,
+}
+
 pub const DEFAULT_LOCALHOST_API_PORT: u16 = 47_831;
 
 fn default_localhost_api_port() -> u16 {
@@ -606,6 +666,9 @@ pub struct AppConfig {
     /// 存储配置
     #[serde(default)]
     pub storage: StorageConfig,
+    /// 远程存储配置（S3/MinIO 或 WebDAV）
+    #[serde(default)]
+    pub remote_storage: RemoteStorageConfig,
     /// 日报附加提示词
     #[serde(default)]
     pub daily_report_custom_prompt: String,
@@ -803,6 +866,7 @@ impl Default for AppConfig {
             deleted_default_categories: Vec::new(),
             deleted_default_semantic_categories: Vec::new(),
             storage: StorageConfig::default(),
+            remote_storage: RemoteStorageConfig::default(),
             daily_report_custom_prompt: String::new(),
             daily_report_prompt_presets: Vec::new(),
             daily_report_export_dir: None,

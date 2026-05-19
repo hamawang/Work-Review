@@ -454,6 +454,7 @@ mod tests {
             executable_path: None,
             semantic_category: Some("编码开发".to_string()),
             semantic_confidence: Some(90),
+            screenshot_url: None,
         }
     }
 

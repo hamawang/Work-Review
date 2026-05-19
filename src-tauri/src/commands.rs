@@ -6288,6 +6288,45 @@ pub async fn get_screenshot_full(
         .generate_full_image_base64(&full_path)
 }
 
+/// 测试远程存储连接
+#[tauri::command]
+pub async fn test_remote_storage(
+    state: State<'_, Arc<Mutex<AppState>>>,
+) -> Result<String, AppError> {
+    let (remote_config, data_dir) = {
+        let guard = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
+        (guard.config.remote_storage.clone(), guard.data_dir.clone())
+    };
+
+    if remote_config.provider == work_review_core::config::RemoteStorageProvider::None {
+        return Err(AppError::Config("未配置远程存储".into()));
+    }
+
+    let test_path = data_dir.join("remote_test.jpg");
+    let test_bytes: Vec<u8> = {
+        let img = image::RgbImage::from_pixel(1, 1, image::Rgb([128, 128, 128]));
+        let mut buf = std::io::Cursor::new(Vec::new());
+        img.write_to(&mut buf, image::ImageFormat::Jpeg)
+            .map_err(|e| AppError::Screenshot(format!("创建测试图片失败: {e}")))?;
+        buf.into_inner()
+    };
+    tokio::fs::write(&test_path, &test_bytes)
+        .await
+        .map_err(|e| AppError::Screenshot(format!("写入测试文件失败: {e}")))?;
+
+    let client = reqwest::Client::new();
+    let result =
+        crate::remote_upload::upload_screenshot(&client, &remote_config, &test_path, "test/connection-test.jpg")
+            .await;
+
+    let _ = tokio::fs::remove_file(&test_path).await;
+
+    match result {
+        Ok(url) => Ok(format!("连接成功: {url}")),
+        Err(e) => Err(e),
+    }
+}
+
 /// 手动执行一次截屏
 #[tauri::command]
 pub async fn take_screenshot(state: State<'_, Arc<Mutex<AppState>>>) -> Result<Activity, AppError> {
@@ -6389,6 +6428,7 @@ pub async fn take_screenshot(state: State<'_, Arc<Mutex<AppState>>>) -> Result<A
         executable_path,
         semantic_category: Some(semantic_category),
         semantic_confidence: Some(i32::from(semantic_confidence)),
+        screenshot_url: None,
     };
 
     // 保存到数据库

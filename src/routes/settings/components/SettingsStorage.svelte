@@ -22,6 +22,10 @@
   let retentionDaysLabel = '';
   let storageRetentionLabel = '';
   let keepForever = false;
+  let isTestingRemote = false;
+  let s3SecretKeyVisible = false;
+  let s3AccessKeyVisible = false;
+  let webdavPasswordVisible = false;
   const screenshotModes = [
     {
       value: 'active_window',
@@ -188,6 +192,18 @@
     handleChange();
   }
 
+  async function testRemoteStorage() {
+    isTestingRemote = true;
+    try {
+      const result = await invoke('test_remote_storage');
+      showToast(result, 'success');
+    } catch (e) {
+      showToast(t('settingsStorage.testConnectionFailed', { error: e }), 'error');
+    } finally {
+      isTestingRemote = false;
+    }
+  }
+
   // 计算存储使用百分比
   $: usagePercent = storageStats 
     ? Math.min(Math.round((storageStats.total_size_mb / storageStats.storage_limit_mb) * 100), 100) 
@@ -205,6 +221,11 @@
   }
   $: if (cleanupCandidateDir && cleanupCandidateDir === dataDir) {
     cleanupCandidateDir = '';
+  }
+  $: {
+    if (!config.remote_storage) config.remote_storage = { provider: 'none', s3: {}, webdav: {} };
+    if (!config.remote_storage.s3) config.remote_storage.s3 = {};
+    if (!config.remote_storage.webdav) config.remote_storage.webdav = {};
   }
 </script>
 
@@ -473,6 +494,310 @@
         </button>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- 远程存储 -->
+<div class="settings-card mb-5" data-locale={currentLocale}>
+  <h3 class="settings-card-title">{t('settingsStorage.remoteStorageTitle')}</h3>
+  <p class="settings-card-desc mb-0">{t('settingsStorage.remoteStorageDesc')}</p>
+
+  <div class="settings-section space-y-4">
+    <div class="rounded-2xl border border-slate-200/80 bg-slate-50/90 p-4 dark:border-slate-700/80 dark:bg-slate-800/40">
+      <div class="flex items-center gap-2 mb-3">
+        <div class="flex h-6 w-6 items-center justify-center rounded-md bg-primary-100 dark:bg-primary-900/30">
+          <svg class="w-3.5 h-3.5 text-primary-600 dark:text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+          </svg>
+        </div>
+        <span class="text-sm font-medium text-slate-700 dark:text-slate-200">{t('settingsStorage.remoteProvider')}</span>
+      </div>
+      <div class="flex gap-2">
+        {#each [
+          { value: 'none', label: t('settingsStorage.remoteProviderNone') },
+          { value: 's3', label: t('settingsStorage.remoteProviderS3') },
+          { value: 'webdav', label: t('settingsStorage.remoteProviderWebDav') },
+        ] as opt}
+          <button
+            type="button"
+            on:click={() => {
+              if (!config.remote_storage) config.remote_storage = { provider: 'none', s3: {}, webdav: {} };
+              config.remote_storage = { ...config.remote_storage, provider: opt.value };
+              handleChange();
+            }}
+            class="flex-1 min-h-9 px-3 py-2 text-xs font-medium rounded-lg leading-none transition-all
+                   {(config.remote_storage?.provider || 'none') === opt.value
+                     ? 'settings-segment-active'
+                     : 'settings-segment-base'}"
+          >
+            {opt.label}
+          </button>
+        {/each}
+      </div>
+    </div>
+
+    {#if config.remote_storage?.provider === 's3'}
+      <div class="rounded-2xl border border-slate-200/80 bg-slate-50/90 p-4 space-y-3 dark:border-slate-700/80 dark:bg-slate-800/40">
+        <div class="flex items-center gap-2">
+          <div class="flex h-6 w-6 items-center justify-center rounded-md bg-amber-100 dark:bg-amber-900/30">
+            <svg class="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
+            </svg>
+          </div>
+          <span class="text-sm font-medium text-slate-700 dark:text-slate-200">S3 / MinIO</span>
+          <span class="settings-chip-success">{t('settingsStorage.remoteProviderS3')}</span>
+        </div>
+
+        <div class="grid gap-2 grid-cols-2">
+          <label class="block">
+            <span class="text-[11px] text-slate-500 dark:text-slate-400">{t('settingsStorage.s3Endpoint')}</span>
+            <input
+              type="text"
+              bind:value={config.remote_storage.s3.endpoint}
+              on:blur={handleChange}
+              class="mt-0.5 w-full rounded-md bg-white/80 px-3 py-1.5 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+              placeholder={t('settingsStorage.s3EndpointHint')}
+            />
+          </label>
+          <label class="block">
+            <span class="text-[11px] text-slate-500 dark:text-slate-400">{t('settingsStorage.s3Bucket')}</span>
+            <input
+              type="text"
+              bind:value={config.remote_storage.s3.bucket}
+              on:blur={handleChange}
+              class="mt-0.5 w-full rounded-md bg-white/80 px-3 py-1.5 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+              placeholder="my-bucket"
+            />
+          </label>
+        </div>
+
+        <div class="grid gap-2 grid-cols-2">
+          <label class="block">
+            <span class="text-[11px] text-slate-500 dark:text-slate-400">{t('settingsStorage.s3AccessKey')}</span>
+            <div class="mt-0.5 relative">
+              {#if s3AccessKeyVisible}
+                <input
+                  type="text"
+                  bind:value={config.remote_storage.s3.access_key}
+                  on:blur={handleChange}
+                  class="w-full rounded-md bg-white/80 px-3 py-1.5 pr-8 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+                  placeholder="Access Key"
+                  autocomplete="off"
+                />
+              {:else}
+                <input
+                  type="password"
+                  bind:value={config.remote_storage.s3.access_key}
+                  on:blur={handleChange}
+                  class="w-full rounded-md bg-white/80 px-3 py-1.5 pr-8 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+                  placeholder="Access Key"
+                  autocomplete="off"
+                />
+              {/if}
+              <button
+                type="button"
+                class="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                on:click={() => (s3AccessKeyVisible = !s3AccessKeyVisible)}
+              >
+                {#if s3AccessKeyVisible}
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L6.59 6.59m7.532 7.532l3.29 3.29M3 3l18 18" /></svg>
+                {:else}
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                {/if}
+              </button>
+            </div>
+          </label>
+          <label class="block">
+            <span class="text-[11px] text-slate-500 dark:text-slate-400">{t('settingsStorage.s3SecretKey')}</span>
+            <div class="mt-0.5 relative">
+              {#if s3SecretKeyVisible}
+                <input
+                  type="text"
+                  bind:value={config.remote_storage.s3.secret_key}
+                  on:blur={handleChange}
+                  class="w-full rounded-md bg-white/80 px-3 py-1.5 pr-8 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+                  placeholder="Secret Key"
+                  autocomplete="off"
+                />
+              {:else}
+                <input
+                  type="password"
+                  bind:value={config.remote_storage.s3.secret_key}
+                  on:blur={handleChange}
+                  class="w-full rounded-md bg-white/80 px-3 py-1.5 pr-8 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+                  placeholder="Secret Key"
+                  autocomplete="off"
+                />
+              {/if}
+              <button
+                type="button"
+                class="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                on:click={() => (s3SecretKeyVisible = !s3SecretKeyVisible)}
+              >
+                {#if s3SecretKeyVisible}
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L6.59 6.59m7.532 7.532l3.29 3.29M3 3l18 18" /></svg>
+                {:else}
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                {/if}
+              </button>
+            </div>
+          </label>
+        </div>
+
+        <div class="grid gap-2 grid-cols-2">
+          <label class="block">
+            <span class="text-[11px] text-slate-500 dark:text-slate-400">{t('settingsStorage.s3Region')}</span>
+            <input
+              type="text"
+              bind:value={config.remote_storage.s3.region}
+              on:blur={handleChange}
+              class="mt-0.5 w-full rounded-md bg-white/80 px-3 py-1.5 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+              placeholder="us-east-1"
+            />
+          </label>
+          <label class="block">
+            <span class="text-[11px] text-slate-500 dark:text-slate-400">{t('settingsStorage.s3PathPrefix')}</span>
+            <input
+              type="text"
+              bind:value={config.remote_storage.s3.path_prefix}
+              on:blur={handleChange}
+              class="mt-0.5 w-full rounded-md bg-white/80 px-3 py-1.5 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+              placeholder={t('settingsStorage.s3PathPrefixHint')}
+            />
+          </label>
+        </div>
+
+        <label class="block">
+          <span class="text-[11px] text-slate-500 dark:text-slate-400">{t('settingsStorage.s3PublicUrlBase')}</span>
+          <input
+            type="text"
+            bind:value={config.remote_storage.s3.public_url_base}
+            on:blur={handleChange}
+            class="mt-0.5 w-full rounded-md bg-white/80 px-3 py-1.5 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+            placeholder={t('settingsStorage.s3PublicUrlBaseHint')}
+          />
+        </label>
+
+        <div class="flex items-center justify-between pt-1">
+          <p class="text-[11px] text-slate-400 dark:text-slate-500">{t('settingsStorage.remoteStorageDesc')}</p>
+          <button
+            type="button"
+            class="settings-action-secondary"
+            disabled={isTestingRemote}
+            on:click={testRemoteStorage}
+          >
+            {isTestingRemote ? t('settingsStorage.testConnectionTesting') : t('settingsStorage.testConnection')}
+          </button>
+        </div>
+      </div>
+    {/if}
+
+    {#if config.remote_storage?.provider === 'webdav'}
+      <div class="rounded-2xl border border-slate-200/80 bg-slate-50/90 p-4 space-y-3 dark:border-slate-700/80 dark:bg-slate-800/40">
+        <div class="flex items-center gap-2">
+          <div class="flex h-6 w-6 items-center justify-center rounded-md bg-blue-100 dark:bg-blue-900/30">
+            <svg class="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" />
+            </svg>
+          </div>
+          <span class="text-sm font-medium text-slate-700 dark:text-slate-200">WebDAV</span>
+          <span class="settings-chip-success">{t('settingsStorage.remoteProviderWebDav')}</span>
+        </div>
+
+        <label class="block">
+          <span class="text-[11px] text-slate-500 dark:text-slate-400">{t('settingsStorage.webdavUrl')}</span>
+          <input
+            type="text"
+            bind:value={config.remote_storage.webdav.url}
+            on:blur={handleChange}
+            class="mt-0.5 w-full rounded-md bg-white/80 px-3 py-1.5 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+            placeholder={t('settingsStorage.webdavUrlHint')}
+          />
+        </label>
+
+        <div class="grid gap-2 grid-cols-2">
+          <label class="block">
+            <span class="text-[11px] text-slate-500 dark:text-slate-400">{t('settingsStorage.webdavUsername')}</span>
+            <input
+              type="text"
+              bind:value={config.remote_storage.webdav.username}
+              on:blur={handleChange}
+              class="mt-0.5 w-full rounded-md bg-white/80 px-3 py-1.5 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+              placeholder="username"
+            />
+          </label>
+          <label class="block">
+            <span class="text-[11px] text-slate-500 dark:text-slate-400">{t('settingsStorage.webdavPassword')}</span>
+            <div class="mt-0.5 relative">
+              {#if webdavPasswordVisible}
+                <input
+                  type="text"
+                  bind:value={config.remote_storage.webdav.password}
+                  on:blur={handleChange}
+                  class="w-full rounded-md bg-white/80 px-3 py-1.5 pr-8 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+                  placeholder="password"
+                  autocomplete="off"
+                />
+              {:else}
+                <input
+                  type="password"
+                  bind:value={config.remote_storage.webdav.password}
+                  on:blur={handleChange}
+                  class="w-full rounded-md bg-white/80 px-3 py-1.5 pr-8 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+                  placeholder="password"
+                  autocomplete="off"
+                />
+              {/if}
+              <button
+                type="button"
+                class="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                on:click={() => (webdavPasswordVisible = !webdavPasswordVisible)}
+              >
+                {#if webdavPasswordVisible}
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L6.59 6.59m7.532 7.532l3.29 3.29M3 3l18 18" /></svg>
+                {:else}
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                {/if}
+              </button>
+            </div>
+          </label>
+        </div>
+
+        <label class="block">
+          <span class="text-[11px] text-slate-500 dark:text-slate-400">{t('settingsStorage.webdavPathPrefix')}</span>
+          <input
+            type="text"
+            bind:value={config.remote_storage.webdav.path_prefix}
+            on:blur={handleChange}
+            class="mt-0.5 w-full rounded-md bg-white/80 px-3 py-1.5 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+            placeholder={t('settingsStorage.webdavPathPrefixHint')}
+          />
+        </label>
+
+        <label class="block">
+          <span class="text-[11px] text-slate-500 dark:text-slate-400">{t('settingsStorage.webdavPublicUrlBase')}</span>
+          <input
+            type="text"
+            bind:value={config.remote_storage.webdav.public_url_base}
+            on:blur={handleChange}
+            class="mt-0.5 w-full rounded-md bg-white/80 px-3 py-1.5 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+            placeholder={t('settingsStorage.webdavPublicUrlBaseHint')}
+          />
+        </label>
+
+        <div class="flex items-center justify-between pt-1">
+          <p class="text-[11px] text-slate-400 dark:text-slate-500">{t('settingsStorage.remoteStorageDesc')}</p>
+          <button
+            type="button"
+            class="settings-action-secondary"
+            disabled={isTestingRemote}
+            on:click={testRemoteStorage}
+          >
+            {isTestingRemote ? t('settingsStorage.testConnectionTesting') : t('settingsStorage.testConnection')}
+          </button>
+        </div>
+      </div>
+    {/if}
   </div>
 </div>
 

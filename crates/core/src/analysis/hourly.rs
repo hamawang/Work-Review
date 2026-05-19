@@ -261,6 +261,7 @@ mod tests {
             executable_path: None,
             semantic_category: None,
             semantic_confidence: None,
+            screenshot_url: None,
         }
     }
 
