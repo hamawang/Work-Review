@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.47] - 2026-05-20
+
+### 新增
+- 远程截图存储：支持 S3/MinIO 和 WebDAV 上传截图，上传成功后回写 URL 到数据库（#88, @lumia1998）
+- 时间线详情弹窗隐私规则快捷设置：三段式按钮 + 确认弹窗，支持完全记录/仅统计时长/完全忽略
+- About 页面自动检查更新开关：可关闭启动时自动更新检查
+- Localhost API 文档写入 README（#83）
+
+### 安全
+- Telegram Bot 新增 chat_id 白名单：未授权会话拒绝响应（#86）
+- 飞书 Bot 强制要求 verification_token：未配置时拒绝所有请求（#86）
+- localhost API 限制 loopback 地址：禁止绑定 0.0.0.0 暴露到局域网（#86）
+- Tauri webview 添加 CSP 安全策略（#86）
+- shell:allow-execute 添加 args 校验（#86）
+- config.json 写入时设置 0o600 权限（#86）
+- 更新 endpoint 顺序调整：GitHub 直连优先，代理作为 fallback（#86）
+
+### 优化
+- 隐私规则按钮从合并样式改为带间距的独立卡片
+- 三语 i18n 补全（zh-CN / en / zh-TW）
+
 ## [1.0.46] - 2026-05-09
 
 ### 修复
