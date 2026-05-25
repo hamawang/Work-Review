@@ -85,10 +85,10 @@ test('桌宠开关 UI 状态应区分开启和关闭', () => {
 });
 
 test('桌宠缩放应限制在允许范围内', () => {
-  assert.equal(AVATAR_SCALE_MIN, 0.7);
+  assert.equal(AVATAR_SCALE_MIN, 0.4);
   assert.equal(AVATAR_SCALE_MAX, 1.3);
   assert.equal(AVATAR_SCALE_DEFAULT, 0.9);
-  assert.equal(clampAvatarScale(0.4), 0.7);
+  assert.equal(clampAvatarScale(0.2), 0.4);
   assert.equal(clampAvatarScale(2), 1.3);
   assert.equal(clampAvatarScale('bad'), 0.9);
 });

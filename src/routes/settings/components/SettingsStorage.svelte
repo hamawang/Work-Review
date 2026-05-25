@@ -886,7 +886,7 @@
             <div class="mb-2 flex items-end justify-between">
               <div>
                 <span class="text-2xl font-bold text-slate-800 dark:text-white">{storageStats.total_size_mb}</span>
-                <span class="settings-muted"> / {storageStats.storage_limit_mb} MB</span>
+                <span class="settings-muted"> / {config.storage.storage_limit_mb} MB</span>
               </div>
               <span class="text-sm font-medium {usagePercent > 80 ? 'settings-text-danger' : 'settings-muted'}">{usagePercent}%</span>
             </div>
@@ -895,6 +895,24 @@
                 class="h-full rounded-full transition-all duration-500 {usageColor}"
                 style="width: {usagePercent}%"
               ></div>
+            </div>
+          </div>
+          <div class="mb-4 flex items-center justify-between gap-3">
+            <span class="text-xs text-slate-500 dark:text-slate-400">{t('settingsStorage.storageLimitLabel')}</span>
+            <div class="flex items-center gap-1.5">
+              <input
+                type="number"
+                min="256"
+                max="102400"
+                step="256"
+                bind:value={config.storage.storage_limit_mb}
+                on:change={() => {
+                  config.storage.storage_limit_mb = Math.max(256, Number(config.storage.storage_limit_mb) || 2048);
+                  handleChange();
+                }}
+                class="w-24 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-right text-sm font-mono text-slate-700 ring-1 ring-slate-200 focus:ring-primary-300 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+              />
+              <span class="text-xs text-slate-400 dark:text-slate-500">MB</span>
             </div>
           </div>
 

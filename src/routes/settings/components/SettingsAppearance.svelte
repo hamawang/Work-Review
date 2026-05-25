@@ -361,7 +361,7 @@
 
       <input
         type="range"
-        min="0.7"
+        min="0.4"
         max="1.3"
         step="0.05"
         value={avatarScale}

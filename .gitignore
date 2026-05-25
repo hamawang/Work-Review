@@ -27,13 +27,14 @@ npm-debug.log*
 .env.*.local
 
 # Data
-data/
+/data/
 *.db
 *.db-journal
-screenshots/
+/screenshots/
 
 # Live2D SDK / local experiment files (not shipped in release)
-lib/
+# 注意：用 `/lib/` 锚定到仓库根目录，避免误伤 `src/lib/`（前端核心代码所在地）。
+/lib/
 public/js/CubismSdkForWeb-*/
 public/js/*.zip
 src-tauri/assets/live2d-models/
@@ -51,8 +52,8 @@ __pycache__/
 *.pyc
 *.pyo
 .Python
-env/
-venv/
+/env/
+/venv/
 
 # Bot config
 bots/config.json
@@ -63,4 +64,5 @@ TEST_REPORT_*.md
 src-tauri/icons.backup/
 .worktrees/
 .superpowers/
-target/
+# Cargo 工作区根目录的 target/（子 crate 的 target 已分别在上面显式列出）
+/target/

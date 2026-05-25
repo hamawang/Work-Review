@@ -11,11 +11,13 @@ mod analysis;
 mod autostart;
 mod avatar_engine;
 mod avatar_followup;
+mod bot_common;
 #[allow(dead_code)]
 mod avatar_input;
 mod commands;
 mod config;
 mod database;
+mod dingtalk_bot;
 mod error;
 mod feishu_bot;
 mod idle_detector;
@@ -31,6 +33,7 @@ mod screen_lock;
 mod screenshot;
 mod storage;
 mod telegram_bot;
+mod wecom_bot;
 mod work_intelligence;
 
 use chrono;

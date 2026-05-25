@@ -726,6 +726,24 @@ pub struct AppConfig {
     /// 飞书 Encrypt Key
     #[serde(default)]
     pub feishu_encrypt_key: Option<String>,
+    /// 是否启用企业微信 Bot
+    #[serde(default)]
+    pub wecom_bot_enabled: bool,
+    /// 企业微信 Corp ID
+    #[serde(default)]
+    pub wecom_corp_id: Option<String>,
+    /// 企业微信回调 Token
+    #[serde(default)]
+    pub wecom_token: Option<String>,
+    /// 企业微信 EncodingAESKey
+    #[serde(default)]
+    pub wecom_encoding_aes_key: Option<String>,
+    /// 是否启用钉钉 Bot
+    #[serde(default)]
+    pub dingtalk_bot_enabled: bool,
+    /// 钉钉应用 App Secret
+    #[serde(default)]
+    pub dingtalk_app_secret: Option<String>,
     /// 是否启用 MCP Server
     #[serde(default)]
     pub mcp_server_enabled: bool,
@@ -895,6 +913,12 @@ impl Default for AppConfig {
             feishu_app_secret: None,
             feishu_verification_token: None,
             feishu_encrypt_key: None,
+            wecom_bot_enabled: false,
+            wecom_corp_id: None,
+            wecom_token: None,
+            wecom_encoding_aes_key: None,
+            dingtalk_bot_enabled: false,
+            dingtalk_app_secret: None,
             mcp_server_enabled: false,
             node_devices: Vec::new(),
             node_gateway: NodeGatewayConfig::default(),
@@ -1400,7 +1424,7 @@ fn normalize_avatar_scale(value: f64) -> f64 {
         return default_avatar_scale();
     }
 
-    value.clamp(0.7, 1.3)
+    value.clamp(0.4, 1.3)
 }
 
 fn normalize_avatar_opacity(value: f64) -> f64 {
@@ -1607,7 +1631,7 @@ mod tests {
 
     #[test]
     fn 桌宠缩放应被钳制在允许范围内() {
-        assert_eq!(normalize_avatar_scale(0.3), 0.7);
+        assert_eq!(normalize_avatar_scale(0.2), 0.4);
         assert_eq!(normalize_avatar_scale(2.0), 1.3);
         assert_eq!(normalize_avatar_scale(f64::NAN), 0.9);
     }

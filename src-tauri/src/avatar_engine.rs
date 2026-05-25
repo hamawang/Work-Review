@@ -10,7 +10,7 @@ pub const AVATAR_BUBBLE_EVENT: &str = "avatar-bubble";
 pub const AVATAR_INPUT_EVENT: &str = "avatar-input-changed";
 pub const AVATAR_PRESET_DEFAULT: &str = "original-standard";
 
-const AVATAR_SCALE_MIN: f64 = 0.7;
+const AVATAR_SCALE_MIN: f64 = 0.4;
 const AVATAR_SCALE_MAX: f64 = 1.3;
 const AVATAR_SCALE_DEFAULT: f64 = 0.9;
 const AVATAR_OPACITY_DEFAULT: f64 = 0.82;

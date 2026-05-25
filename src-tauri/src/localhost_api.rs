@@ -813,6 +813,87 @@ async fn route_request(
                 body: resp.body.into_bytes(),
             })
         }
+        ("GET", "/wecom/callback") => {
+            let config = {
+                let guard = state.lock().map_err(|e| AppError::Unknown(e.to_string()));
+                match guard {
+                    Ok(s) => s.config.clone(),
+                    Err(e) => return HttpResponse::error(500, e.to_string()),
+                }
+            };
+            if !config.wecom_bot_enabled {
+                return HttpResponse::error(404, "企业微信 Bot 未启用");
+            }
+            let resp = crate::wecom_bot::handle_wecom_verify(&request.query, &config);
+            let content_type: &'static str = match resp.content_type.as_str() {
+                ct if ct.contains("xml") => "application/xml; charset=utf-8",
+                ct if ct.contains("text") => "text/plain; charset=utf-8",
+                _ => "application/json; charset=utf-8",
+            };
+            Ok(HttpResponse {
+                status: resp.status,
+                reason: reason_phrase(resp.status),
+                content_type,
+                body: resp.body.into_bytes(),
+            })
+        }
+        ("POST", "/wecom/callback") => {
+            let (config, data_dir) = {
+                let guard = state.lock().map_err(|e| AppError::Unknown(e.to_string()));
+                match guard {
+                    Ok(s) => (s.config.clone(), s.data_dir.clone()),
+                    Err(e) => return HttpResponse::error(500, e.to_string()),
+                }
+            };
+            if !config.wecom_bot_enabled {
+                return HttpResponse::error(404, "企业微信 Bot 未启用");
+            }
+            let body_str = String::from_utf8_lossy(&request.body);
+            let resp = crate::wecom_bot::handle_wecom_callback(
+                &request.query,
+                &body_str,
+                &config,
+                &data_dir,
+            )
+            .await;
+            let content_type: &'static str = if resp.content_type.contains("xml") {
+                "application/xml; charset=utf-8"
+            } else {
+                "application/json; charset=utf-8"
+            };
+            Ok(HttpResponse {
+                status: resp.status,
+                reason: reason_phrase(resp.status),
+                content_type,
+                body: resp.body.into_bytes(),
+            })
+        }
+        ("POST", "/dingtalk/callback") => {
+            let (config, data_dir) = {
+                let guard = state.lock().map_err(|e| AppError::Unknown(e.to_string()));
+                match guard {
+                    Ok(s) => (s.config.clone(), s.data_dir.clone()),
+                    Err(e) => return HttpResponse::error(500, e.to_string()),
+                }
+            };
+            if !config.dingtalk_bot_enabled {
+                return HttpResponse::error(404, "钉钉 Bot 未启用");
+            }
+            let body_str = String::from_utf8_lossy(&request.body);
+            let resp = crate::dingtalk_bot::handle_dingtalk_callback(
+                &request.headers,
+                &body_str,
+                &config,
+                &data_dir,
+            )
+            .await;
+            Ok(HttpResponse {
+                status: resp.status,
+                reason: reason_phrase(resp.status),
+                content_type: "application/json; charset=utf-8",
+                body: resp.body.into_bytes(),
+            })
+        }
         _ => Ok(HttpResponse::error(404, "未找到本地 API 路径")),
     };
 
@@ -836,6 +917,15 @@ fn request_auth_mode(method: &str, path: &str) -> RequestAuthMode {
         return RequestAuthMode::None;
     }
     if method == "POST" && path == "/feishu/event" {
+        return RequestAuthMode::None;
+    }
+    if method == "GET" && path == "/wecom/callback" {
+        return RequestAuthMode::None;
+    }
+    if method == "POST" && path == "/wecom/callback" {
+        return RequestAuthMode::None;
+    }
+    if method == "POST" && path == "/dingtalk/callback" {
         return RequestAuthMode::None;
     }
     RequestAuthMode::LocalApiToken
@@ -924,7 +1014,8 @@ mod tests {
 
     #[test]
     fn 时间线路由各种日期形态都应触发鉴权() {
-        // 防止某些日期格式误命中 None 白名单（白名单仅 /health 与 /feishu/event）。
+        // 防止某些日期格式误命中 None 白名单。
+        // 当前免鉴权白名单：/health、/feishu/event、/wecom/callback (GET+POST)、/dingtalk/callback。
         for path in [
             "/v1/timeline/2026-05-08",
             "/v1/timeline/2026-01-01",
@@ -939,8 +1030,9 @@ mod tests {
     }
 
     #[test]
-    fn 健康检查与飞书事件外的所有方法都应被鉴权() {
-        // 巩固现有契约：白名单是 {GET /health, POST /feishu/event}，其它一切 = LocalApiToken。
+    fn 健康检查与机器人回调外的所有方法都应被鉴权() {
+        // 巩固现有契约：白名单是 {GET /health, POST /feishu/event,
+        // GET/POST /wecom/callback, POST /dingtalk/callback}，其它一切 = LocalApiToken。
         assert_eq!(
             request_auth_mode("POST", "/v1/weekly-review"),
             RequestAuthMode::LocalApiToken
@@ -951,6 +1043,36 @@ mod tests {
         );
         assert_eq!(
             request_auth_mode("GET", "/v1/anything-new-we-add-later"),
+            RequestAuthMode::LocalApiToken
+        );
+    }
+
+    #[test]
+    fn 机器人回调路由应在免鉴权白名单内() {
+        // 三个 webhook 路由本身依赖各自的签名校验，不走 localhost token。
+        assert_eq!(
+            request_auth_mode("GET", "/wecom/callback"),
+            RequestAuthMode::None
+        );
+        assert_eq!(
+            request_auth_mode("POST", "/wecom/callback"),
+            RequestAuthMode::None
+        );
+        assert_eq!(
+            request_auth_mode("POST", "/dingtalk/callback"),
+            RequestAuthMode::None
+        );
+        assert_eq!(
+            request_auth_mode("POST", "/feishu/event"),
+            RequestAuthMode::None
+        );
+        // 错误的方法仍要鉴权（防止误开放）
+        assert_eq!(
+            request_auth_mode("DELETE", "/wecom/callback"),
+            RequestAuthMode::LocalApiToken
+        );
+        assert_eq!(
+            request_auth_mode("GET", "/dingtalk/callback"),
             RequestAuthMode::LocalApiToken
         );
     }

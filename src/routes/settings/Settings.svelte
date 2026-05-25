@@ -117,6 +117,24 @@
       if (typeof config.feishu_verification_token !== 'string' && config.feishu_verification_token !== null) {
         config.feishu_verification_token = null;
       }
+      if (typeof config.wecom_bot_enabled !== 'boolean') {
+        config.wecom_bot_enabled = false;
+      }
+      if (typeof config.wecom_corp_id !== 'string' && config.wecom_corp_id !== null) {
+        config.wecom_corp_id = null;
+      }
+      if (typeof config.wecom_token !== 'string' && config.wecom_token !== null) {
+        config.wecom_token = null;
+      }
+      if (typeof config.wecom_encoding_aes_key !== 'string' && config.wecom_encoding_aes_key !== null) {
+        config.wecom_encoding_aes_key = null;
+      }
+      if (typeof config.dingtalk_bot_enabled !== 'boolean') {
+        config.dingtalk_bot_enabled = false;
+      }
+      if (typeof config.dingtalk_app_secret !== 'string' && config.dingtalk_app_secret !== null) {
+        config.dingtalk_app_secret = null;
+      }
       if (!config.node_gateway || typeof config.node_gateway !== 'object') {
         config.node_gateway = {
           device_name: null,

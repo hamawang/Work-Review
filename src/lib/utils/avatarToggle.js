@@ -1,6 +1,6 @@
 import { t } from '../i18n/index.js';
 
-export const AVATAR_SCALE_MIN = 0.7;
+export const AVATAR_SCALE_MIN = 0.4;
 export const AVATAR_SCALE_MAX = 1.3;
 export const AVATAR_SCALE_DEFAULT = 0.9;
 export const AVATAR_OPACITY_MIN = 0.45;

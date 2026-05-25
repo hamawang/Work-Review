@@ -18,6 +18,7 @@
   let tokenValue = '';
   let tgTokenVisible = false;
   let feishuSecretVisible = false;
+  let dingtalkSecretVisible = false;
   let examplesExpanded = false;
   let activeApiCategory = 'all';
   let tgStatusPollId = null;
@@ -215,6 +216,22 @@
     try {
       await navigator.clipboard.writeText(mcpConfigJson);
       showToast(t('nodeGatewayPage.mcpServerConfigCopied'), 'success');
+    } catch (error) {
+      showToast(t('nodeGatewayPage.tokenCopyFailed', { error }), 'error');
+    }
+  }
+
+  /**
+   * 复制 MCP 路径到剪贴板。labelKey 用于本地化 toast 文案，比如 'mcpServerDbPath'。
+   */
+  async function copyPath(text, labelKey) {
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast(
+        t('nodeGatewayPage.mcpServerPathCopied', { label: t(`nodeGatewayPage.${labelKey}`) }),
+        'success'
+      );
     } catch (error) {
       showToast(t('nodeGatewayPage.tokenCopyFailed', { error }), 'error');
     }
@@ -594,8 +611,125 @@
           {/if}
         </div>
 
+        <!-- WeCom Bot (企业微信) -->
+        <div class="rounded-xl bg-white/70 px-3.5 py-3 ring-1 ring-slate-200/70 dark:bg-slate-900/20 dark:ring-slate-700/70">
+          <div class="flex items-center justify-between gap-3">
+            <div class="flex items-center gap-2">
+              <svg class="w-4 h-4 text-[#07C160]" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M8.691 2.188C3.891 2.188 0 5.476 0 9.53c0 2.212 1.17 4.203 3.002 5.55a.59.59 0 01.213.665l-.39 1.48c-.019.07-.048.141-.048.213 0 .163.13.295.29.295a.326.326 0 00.167-.054l1.903-1.114a.864.864 0 01.717-.098 10.16 10.16 0 002.837.403c.276 0 .543-.027.811-.05-.857-2.578.157-4.972 1.932-6.446 1.703-1.415 3.882-1.98 5.853-1.838-.576-3.583-4.196-6.348-8.596-6.348zM5.785 5.991c.642 0 1.162.529 1.162 1.18a1.17 1.17 0 01-1.162 1.178A1.17 1.17 0 014.623 7.17c0-.651.52-1.18 1.162-1.18zm5.813 0c.642 0 1.162.529 1.162 1.18a1.17 1.17 0 01-1.162 1.178 1.17 1.17 0 01-1.162-1.178c0-.651.52-1.18 1.162-1.18zm3.97 3.44c-1.86-.015-3.666.64-4.996 1.756-1.742 1.463-2.566 3.691-1.745 5.882.82 2.19 3.07 3.508 5.347 3.698.493.041.993.03 1.488-.035a.639.639 0 01.53.073l1.405.823a.234.234 0 00.122.04.213.213 0 00.214-.218c0-.053-.02-.105-.035-.156l-.288-1.093a.44.44 0 01.157-.491c1.358-.998 2.217-2.467 2.217-4.1 0-3.263-2.928-6.079-6.409-6.179zM14.4 13.19c.475 0 .86.39.86.872a.866.866 0 01-.86.872.866.866 0 01-.86-.872c0-.482.385-.872.86-.872zm4.303 0c.475 0 .86.39.86.872a.866.866 0 01-.86.872.866.866 0 01-.86-.872c0-.482.385-.872.86-.872z"/>
+              </svg>
+              <span class="text-sm text-slate-700 dark:text-slate-200">{t('nodeGatewayPage.wecomBot')}</span>
+              {#if config.wecom_bot_enabled}
+                <span class="settings-chip-success">{t('nodeGatewayPage.wecomEnabled')}</span>
+              {/if}
+            </div>
+            <button
+              type="button"
+              on:click={() => {
+                config.wecom_bot_enabled = !config.wecom_bot_enabled;
+                persistConfig();
+              }}
+              disabled={saving}
+              class="switch-track {config.wecom_bot_enabled ? 'bg-primary-500' : 'bg-slate-300 dark:bg-slate-600'} {saving ? 'opacity-60 cursor-not-allowed' : ''}"
+            >
+              <span class="switch-thumb {config.wecom_bot_enabled ? 'translate-x-5' : 'translate-x-0'}"></span>
+            </button>
+          </div>
+          {#if config.wecom_bot_enabled}
+          <div class="mt-2 space-y-2">
+            <div class="grid gap-2 grid-cols-2">
+              <label class="block">
+                <span class="text-[11px] text-slate-500 dark:text-slate-400">{t('nodeGatewayPage.wecomCorpId')}</span>
+                <input
+                  type="text"
+                  bind:value={config.wecom_corp_id}
+                  on:blur={() => persistConfig()}
+                  class="mt-0.5 w-full rounded-md bg-white/80 px-3 py-1.5 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+                  placeholder="ww..."
+                />
+              </label>
+              <label class="block">
+                <span class="text-[11px] text-slate-500 dark:text-slate-400">{t('nodeGatewayPage.wecomToken')}</span>
+                <input
+                  type="text"
+                  bind:value={config.wecom_token}
+                  on:blur={() => persistConfig()}
+                  class="mt-0.5 w-full rounded-md bg-white/80 px-3 py-1.5 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+                  placeholder="Token"
+                />
+              </label>
+            </div>
+            <label class="block">
+              <span class="text-[11px] text-slate-500 dark:text-slate-400">{t('nodeGatewayPage.wecomEncodingAesKey')}</span>
+              <input
+                type="text"
+                bind:value={config.wecom_encoding_aes_key}
+                on:blur={() => persistConfig()}
+                class="mt-0.5 w-full rounded-md bg-white/80 px-3 py-1.5 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+                placeholder="EncodingAESKey (43 chars)"
+              />
+            </label>
+            <p class="text-[11px] text-slate-400 dark:text-slate-500">{t('nodeGatewayPage.wecomBotHint')}</p>
+          </div>
+          {/if}
+        </div>
+
+        <!-- DingTalk Bot (钉钉) -->
+        <div class="rounded-xl bg-white/70 px-3.5 py-3 ring-1 ring-slate-200/70 dark:bg-slate-900/20 dark:ring-slate-700/70">
+          <div class="flex items-center justify-between gap-3">
+            <div class="flex items-center gap-2">
+              <svg class="w-4 h-4 text-[#0089FF]" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.562 12.152l-3.89 1.26s-.382.124-.274.464c.108.34.542.204.542.204l3.622-.98a.295.295 0 01.36.396l-1.51 3.734s-.15.392-.498.262c-.348-.13-.184-.53-.184-.53l.98-2.32-3.208 1.04s-3.37 1.09-4.478-1.878c-1.108-2.968 1.778-4.576 1.778-4.576l4.998-2.174s.39-.168.254-.496c-.136-.328-.536-.172-.536-.172l-5.458 1.87s-1.906.654-2.69-.642c-.784-1.296.342-2.352.342-2.352l5.024-3.516s.348-.242.18-.57c-.168-.328-.548-.14-.548-.14L6.254 6.12s-4.17 2.768-1.878 7.058c2.292 4.29 7.408 2.174 7.408 2.174l5.778-3.202z"/>
+              </svg>
+              <span class="text-sm text-slate-700 dark:text-slate-200">{t('nodeGatewayPage.dingtalkBot')}</span>
+              {#if config.dingtalk_bot_enabled}
+                <span class="settings-chip-success">{t('nodeGatewayPage.dingtalkEnabled')}</span>
+              {/if}
+            </div>
+            <button
+              type="button"
+              on:click={() => {
+                config.dingtalk_bot_enabled = !config.dingtalk_bot_enabled;
+                persistConfig();
+              }}
+              disabled={saving}
+              class="switch-track {config.dingtalk_bot_enabled ? 'bg-primary-500' : 'bg-slate-300 dark:bg-slate-600'} {saving ? 'opacity-60 cursor-not-allowed' : ''}"
+            >
+              <span class="switch-thumb {config.dingtalk_bot_enabled ? 'translate-x-5' : 'translate-x-0'}"></span>
+            </button>
+          </div>
+          {#if config.dingtalk_bot_enabled}
+          <div class="mt-2 space-y-2">
+            <label class="block">
+              <span class="text-[11px] text-slate-500 dark:text-slate-400">{t('nodeGatewayPage.dingtalkAppSecret')}</span>
+              <div class="mt-0.5 relative">
+                {#if dingtalkSecretVisible}
+                  <input type="text" bind:value={config.dingtalk_app_secret} on:blur={() => persistConfig()}
+                    class="w-full rounded-md bg-white/80 px-3 py-1.5 pr-8 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+                    placeholder="App Secret" />
+                {:else}
+                  <input type="password" bind:value={config.dingtalk_app_secret} on:blur={() => persistConfig()}
+                    class="w-full rounded-md bg-white/80 px-3 py-1.5 pr-8 text-sm font-mono text-slate-800 ring-1 ring-slate-200 focus:ring-primary-300 dark:bg-slate-700/50 dark:text-white dark:ring-slate-600 dark:focus:ring-primary-600 focus:outline-none"
+                    placeholder="App Secret" />
+                {/if}
+                <button type="button"
+                  class="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                  on:click={() => (dingtalkSecretVisible = !dingtalkSecretVisible)}>
+                  {#if dingtalkSecretVisible}
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L6.59 6.59m7.532 7.532l3.29 3.29M3 3l18 18" /></svg>
+                  {:else}
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                  {/if}
+                </button>
+                </div>
+              </label>
+            <p class="text-[11px] text-slate-400 dark:text-slate-500">{t('nodeGatewayPage.dingtalkBotHint')}</p>
+          </div>
+          {/if}
+        </div>
+
         <!-- Device Registry -->
-        {#if config.telegram_bot_enabled || config.feishu_bot_enabled}
+        {#if config.telegram_bot_enabled || config.feishu_bot_enabled || config.wecom_bot_enabled || config.dingtalk_bot_enabled}
         <div class="space-y-2">
           <div class="flex items-center justify-between">
             <span class="text-xs font-medium text-slate-600 dark:text-slate-300">{t('nodeGatewayPage.deviceRegistry')}</span>
@@ -795,20 +929,47 @@
 
           <div class="space-y-1.5">
             {#if mcpDbPath}
-            <div class="flex items-center justify-between gap-2 rounded-lg bg-white/70 px-3 py-1.5 ring-1 ring-slate-200/70 dark:bg-slate-900/20 dark:ring-slate-700/70">
-              <span class="text-[11px] text-slate-500 dark:text-slate-400">{t('nodeGatewayPage.mcpServerDbPath')}</span>
-              <span class="font-mono text-[11px] text-slate-700 dark:text-slate-300 max-w-[60%] truncate" title={mcpDbPath}>{mcpDbPath}</span>
+            <div class="flex flex-col gap-0.5 rounded-lg bg-white/70 px-3 py-1.5 ring-1 ring-slate-200/70 dark:bg-slate-900/20 dark:ring-slate-700/70">
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-[11px] text-slate-500 dark:text-slate-400">{t('nodeGatewayPage.mcpServerDbPath')}</span>
+                <button
+                  type="button"
+                  class="text-[10px] text-primary-500 hover:underline focus:outline-none"
+                  on:click={() => copyPath(mcpDbPath, 'mcpServerDbPath')}
+                >
+                  {t('nodeGatewayPage.mcpServerCopyPath')}
+                </button>
+              </div>
+              <span class="font-mono text-[11px] text-slate-700 dark:text-slate-300 break-all select-all" title={mcpDbPath}>{mcpDbPath}</span>
             </div>
             {/if}
             {#if mcpConfigPath}
-            <div class="flex items-center justify-between gap-2 rounded-lg bg-white/70 px-3 py-1.5 ring-1 ring-slate-200/70 dark:bg-slate-900/20 dark:ring-slate-700/70">
-              <span class="text-[11px] text-slate-500 dark:text-slate-400">{t('nodeGatewayPage.mcpServerConfigPath')}</span>
-              <span class="font-mono text-[11px] text-slate-700 dark:text-slate-300 max-w-[60%] truncate" title={mcpConfigPath}>{mcpConfigPath}</span>
+            <div class="flex flex-col gap-0.5 rounded-lg bg-white/70 px-3 py-1.5 ring-1 ring-slate-200/70 dark:bg-slate-900/20 dark:ring-slate-700/70">
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-[11px] text-slate-500 dark:text-slate-400">{t('nodeGatewayPage.mcpServerConfigPath')}</span>
+                <button
+                  type="button"
+                  class="text-[10px] text-primary-500 hover:underline focus:outline-none"
+                  on:click={() => copyPath(mcpConfigPath, 'mcpServerConfigPath')}
+                >
+                  {t('nodeGatewayPage.mcpServerCopyPath')}
+                </button>
+              </div>
+              <span class="font-mono text-[11px] text-slate-700 dark:text-slate-300 break-all select-all" title={mcpConfigPath}>{mcpConfigPath}</span>
             </div>
             {/if}
-            <div class="flex items-center justify-between gap-2 rounded-lg bg-white/70 px-3 py-1.5 ring-1 ring-slate-200/70 dark:bg-slate-900/20 dark:ring-slate-700/70">
-              <span class="text-[11px] text-slate-500 dark:text-slate-400">{t('nodeGatewayPage.mcpServerBinaryPath')}</span>
-              <span class="font-mono text-[11px] text-slate-700 dark:text-slate-300 max-w-[60%] truncate">work-review-mcp-server</span>
+            <div class="flex flex-col gap-0.5 rounded-lg bg-white/70 px-3 py-1.5 ring-1 ring-slate-200/70 dark:bg-slate-900/20 dark:ring-slate-700/70">
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-[11px] text-slate-500 dark:text-slate-400">{t('nodeGatewayPage.mcpServerBinaryPath')}</span>
+                <button
+                  type="button"
+                  class="text-[10px] text-primary-500 hover:underline focus:outline-none"
+                  on:click={() => copyPath('work-review-mcp-server', 'mcpServerBinaryPath')}
+                >
+                  {t('nodeGatewayPage.mcpServerCopyPath')}
+                </button>
+              </div>
+              <span class="font-mono text-[11px] text-slate-700 dark:text-slate-300 break-all select-all">work-review-mcp-server</span>
             </div>
           </div>
 

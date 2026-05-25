@@ -44,7 +44,30 @@ fn main() {
         }
     };
 
-    let config = AppConfig::load(std::path::Path::new(&config_path)).unwrap_or_default();
+    let config = match AppConfig::load(std::path::Path::new(&config_path)) {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            // 显式提示配置加载失败，避免静默回退到 default 让用户误以为配置生效。
+            log::error!(
+                "无法加载配置文件 {}: {}（将使用默认配置，工作时段/AI 提供方等可能与 UI 显示不一致）",
+                config_path,
+                e
+            );
+            AppConfig::default()
+        }
+    };
+
+    // 用户在 UI 上把 MCP Server 关闭后，即使客户端尝试启动本 binary 也立刻退出。
+    // 这样开关才是"真开关"，而不是仅供查看的状态标签。
+    if !config.mcp_server_enabled {
+        log::error!(
+            "MCP Server 已在 Work Review 设置中关闭。如需启用，请打开 Work Review → 设置 → 接入管理 → MCP Server 开关。"
+        );
+        eprintln!(
+            "MCP Server is disabled in Work Review settings. Enable it via Settings → Integrations → MCP Server."
+        );
+        std::process::exit(2);
+    }
 
     let mut policy = PolicyEnforcer::new(&config);
     let mut skills = SkillEngine::new();
@@ -83,17 +106,41 @@ fn main() {
     let mut stdout = stdout.lock();
 
     for line in stdin.lock().lines() {
-        match line {
-            Ok(line) => {
-                if let Ok(request) = serde_json::from_str::<Value>(&line) {
-                    let response = handle_request(&request, &state);
-                    if let Ok(output) = serde_json::to_string(&response) {
-                        let _ = writeln!(stdout, "{}", output);
-                        let _ = stdout.flush();
+        let line = match line {
+            Ok(l) => l,
+            Err(e) => {
+                log::error!("读取 stdin 失败，退出: {e}");
+                break;
+            }
+        };
+        // 空行（心跳/缓冲清空）直接跳过，不算解析错误
+        if line.trim().is_empty() {
+            continue;
+        }
+        // 解析失败必须按 JSON-RPC 2.0 规范返回 -32700 Parse error，
+        // 不能静默丢弃，否则客户端会一直等响应。
+        let response = match serde_json::from_str::<Value>(&line) {
+            Ok(request) => handle_request(&request, &state),
+            Err(parse_err) => {
+                log::warn!("收到不可解析的 JSON-RPC 请求: {parse_err}");
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": Value::Null,
+                    "error": {
+                        "code": -32700,
+                        "message": format!("Parse error: {parse_err}")
                     }
+                })
+            }
+        };
+        match serde_json::to_string(&response) {
+            Ok(output) => {
+                if writeln!(stdout, "{}", output).is_err() || stdout.flush().is_err() {
+                    log::error!("写 stdout 失败，退出");
+                    break;
                 }
             }
-            Err(_) => break,
+            Err(e) => log::error!("序列化响应失败: {e}"),
         }
     }
 }
@@ -301,29 +348,65 @@ where
         PolicyDecision::Allow => f(&mut s),
         PolicyDecision::AllowSanitized => {
             let mut result = f(&mut s);
-            // 对 result 中的敏感字段做脱敏
-            if let Some(content) = result.get_mut("content") {
-                if let Some(arr) = content.as_array_mut() {
-                    for item in arr.iter_mut() {
-                        if let Some(text) = item.get_mut("text") {
-                            // 简单脱敏：移除 screenshot_path 字段
-                            if let Ok(mut v) = serde_json::from_value::<Value>(text.clone()) {
-                                if let Some(arr) = v.as_array_mut() {
-                                    for item in arr.iter_mut() {
-                                        if let Some(obj) = item.as_object_mut() {
-                                            obj.remove("screenshot_path");
-                                        }
-                                    }
-                                }
-                                *text = serde_json::to_string_pretty(&v).unwrap_or_default().into();
-                            }
-                        }
-                    }
-                }
-            }
+            sanitize_result(&mut result);
             result
         }
         PolicyDecision::Deny => tool_error(&format!("权限被拒绝: 无 {:?} 权限", permission)),
+    }
+}
+
+/// 对 MCP tool 返回值做脱敏处理。MCP content 数组里的 text 字段通常是 JSON 字符串，
+/// 把它解析后递归走一遍，删/截关键敏感字段，再重新序列化。
+fn sanitize_result(result: &mut Value) {
+    let Some(content) = result.get_mut("content").and_then(|c| c.as_array_mut()) else {
+        return;
+    };
+    for item in content.iter_mut() {
+        // text 字段是 JSON 字符串，需要解析后再脱敏
+        let Some(text_str) = item
+            .get("text")
+            .and_then(|t| t.as_str())
+            .map(|s| s.to_string())
+        else {
+            continue;
+        };
+        let Ok(mut parsed) = serde_json::from_str::<Value>(&text_str) else {
+            // 不是 JSON（比如纯文本日报），跳过——这种情况通常不含结构化敏感字段
+            continue;
+        };
+        sanitize_value(&mut parsed);
+        if let Ok(serialized) = serde_json::to_string_pretty(&parsed) {
+            item["text"] = Value::String(serialized);
+        }
+    }
+}
+
+/// 递归脱敏 JSON Value：删除已知敏感字段，截断潜在敏感字段。
+fn sanitize_value(value: &mut Value) {
+    match value {
+        Value::Object(obj) => {
+            // 完全删除：截图路径、OCR 提取文本（屏幕内容可能含密码/私信等）
+            obj.remove("screenshot_path");
+            obj.remove("ocr_text");
+            // 截断：窗口标题常包含具体文件名/网页标题，截前 40 字符保留 app 上下文即可
+            if let Some(title) = obj.get_mut("window_title") {
+                if let Some(s) = title.as_str() {
+                    let head: String = s.chars().take(40).collect();
+                    let suffix = if s.chars().count() > 40 { "…" } else { "" };
+                    *title = Value::String(format!("{head}{suffix}"));
+                }
+            }
+            // 递归处理嵌套对象
+            for (_, v) in obj.iter_mut() {
+                sanitize_value(v);
+            }
+        }
+        Value::Array(arr) => {
+            for item in arr.iter_mut() {
+                sanitize_value(item);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -390,7 +473,8 @@ fn handle_tool_call(name: &str, args: &Value, state: &Arc<Mutex<AppState>>) -> V
         "generate_report" => with_policy_check(state, name, Permission::WriteReport, |s| {
             let date = args["date"].as_str().unwrap_or("");
             let locale = work_review_core::analysis::AppLocale::from_option(args["locale"].as_str());
-            let segments = work_review_core::config::AppConfig::default().effective_work_segments();
+            // 使用用户配置的工作时段，而不是默认值（默认 9-18，会与 UI 显示对不上）。
+            let segments = s.config.effective_work_segments();
             match s.db.get_daily_stats_with_segments(date, &segments) {
                 Ok(stats) => {
                     let summary = work_review_core::analysis::generate_stats_summary_for_locale(&stats, locale, &std::collections::HashMap::new());
@@ -599,4 +683,180 @@ fn handle_prompt_get(name: &str, args: &Value) -> Value {
 
 fn tool_error(message: &str) -> Value {
     json!({ "content": [{ "type": "text", "text": message }], "isError": true })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tools_list_应包含已注册的11个工具() {
+        let tools = tools_list();
+        assert_eq!(tools.len(), 11);
+        let names: Vec<&str> = tools
+            .iter()
+            .filter_map(|t| t.get("name").and_then(|v| v.as_str()))
+            .collect();
+        for required in [
+            "query_timeline",
+            "get_daily_stats",
+            "search_activities",
+            "get_work_sessions",
+            "analyze_intents",
+            "generate_report",
+            "get_report",
+            "get_device_status",
+            "execute_skill",
+            "list_skills",
+            "get_skill_stats",
+        ] {
+            assert!(
+                names.contains(&required),
+                "缺少工具 {required}，实际：{names:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn resources_list_应包含3个资源() {
+        let resources = resources_list();
+        assert_eq!(resources.len(), 3);
+        let uris: Vec<&str> = resources
+            .iter()
+            .filter_map(|r| r.get("uri").and_then(|v| v.as_str()))
+            .collect();
+        assert!(uris.contains(&"timeline/today"));
+        assert!(uris.contains(&"sessions/current"));
+        assert!(uris.contains(&"stats/weekly"));
+    }
+
+    #[test]
+    fn prompts_list_应包含3个提示词模板() {
+        let prompts = prompts_list();
+        assert_eq!(prompts.len(), 3);
+        let names: Vec<&str> = prompts
+            .iter()
+            .filter_map(|p| p.get("name").and_then(|v| v.as_str()))
+            .collect();
+        assert!(names.contains(&"daily_review"));
+        assert!(names.contains(&"weekly_summary"));
+        assert!(names.contains(&"project_time_audit"));
+    }
+
+    #[test]
+    fn tool_error_应返回标准错误格式() {
+        let err = tool_error("拒绝访问");
+        assert_eq!(err["isError"], json!(true));
+        assert_eq!(err["content"][0]["type"], json!("text"));
+        assert_eq!(err["content"][0]["text"], json!("拒绝访问"));
+    }
+
+    #[test]
+    fn handle_prompt_get_应正确填充模板参数() {
+        let res = handle_prompt_get(
+            "project_time_audit",
+            &json!({ "project": "Work Review" }),
+        );
+        assert_eq!(res["description"], json!("项目时间审计"));
+        let text = res["messages"][0]["content"]["text"].as_str().unwrap();
+        assert!(text.contains("Work Review"));
+    }
+
+    #[test]
+    fn handle_prompt_get_对未知名称应返回空文本() {
+        let res = handle_prompt_get("nonexistent", &json!({}));
+        assert_eq!(res["description"], json!("未知提示词"));
+        let text = res["messages"][0]["content"]["text"].as_str().unwrap();
+        assert!(text.is_empty());
+    }
+
+    #[test]
+    fn sanitize_value_应移除screenshot_path() {
+        let mut v = json!({
+            "id": 1,
+            "screenshot_path": "/Users/secret/screenshots/abc.png",
+            "app_name": "Chrome"
+        });
+        sanitize_value(&mut v);
+        assert!(v.get("screenshot_path").is_none());
+        assert_eq!(v["app_name"], json!("Chrome"));
+        assert_eq!(v["id"], json!(1));
+    }
+
+    #[test]
+    fn sanitize_value_应移除ocr_text() {
+        let mut v = json!({
+            "id": 1,
+            "ocr_text": "password: hunter2",
+            "app_name": "Chrome"
+        });
+        sanitize_value(&mut v);
+        assert!(v.get("ocr_text").is_none());
+        assert_eq!(v["app_name"], json!("Chrome"));
+    }
+
+    #[test]
+    fn sanitize_value_应截断过长的window_title() {
+        let long_title = "a".repeat(80);
+        let mut v = json!({ "window_title": long_title });
+        sanitize_value(&mut v);
+        let truncated = v["window_title"].as_str().unwrap();
+        assert!(truncated.ends_with('…'));
+        // 40 字 + 省略号
+        assert_eq!(truncated.chars().count(), 41);
+    }
+
+    #[test]
+    fn sanitize_value_短window_title不应被截断或加省略号() {
+        let mut v = json!({ "window_title": "短标题.txt" });
+        sanitize_value(&mut v);
+        assert_eq!(v["window_title"], json!("短标题.txt"));
+    }
+
+    #[test]
+    fn sanitize_value_应递归处理嵌套结构() {
+        let mut v = json!({
+            "results": [
+                { "ocr_text": "secret1", "title": "ok" },
+                { "ocr_text": "secret2", "title": "ok" }
+            ],
+            "meta": { "screenshot_path": "/path/a.png" }
+        });
+        sanitize_value(&mut v);
+        for item in v["results"].as_array().unwrap() {
+            assert!(item.get("ocr_text").is_none());
+        }
+        assert!(v["meta"].get("screenshot_path").is_none());
+    }
+
+    #[test]
+    fn sanitize_result_应解析text字段里的json再脱敏() {
+        // 模拟 MCP tool 返回结构：content 数组里每个 item.text 是 JSON 字符串
+        let inner = json!([
+            { "id": 1, "screenshot_path": "/sensitive.png", "ocr_text": "leak" }
+        ]);
+        let mut result = json!({
+            "content": [
+                { "type": "text", "text": serde_json::to_string_pretty(&inner).unwrap() }
+            ]
+        });
+        sanitize_result(&mut result);
+        let text = result["content"][0]["text"].as_str().unwrap();
+        let parsed: Value = serde_json::from_str(text).unwrap();
+        assert!(parsed[0].get("screenshot_path").is_none());
+        assert!(parsed[0].get("ocr_text").is_none());
+        assert_eq!(parsed[0]["id"], json!(1));
+    }
+
+    #[test]
+    fn sanitize_result_对非json的text字段应保持不变() {
+        let original = "纯文本日报内容\n\n今日完成 3 项工作";
+        let mut result = json!({
+            "content": [
+                { "type": "text", "text": original }
+            ]
+        });
+        sanitize_result(&mut result);
+        assert_eq!(result["content"][0]["text"].as_str().unwrap(), original);
+    }
 }
