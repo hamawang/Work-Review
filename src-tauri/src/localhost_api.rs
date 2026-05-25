@@ -69,15 +69,6 @@ pub struct LocalhostApiStatusPayload {
 }
 
 #[derive(Debug, Deserialize)]
-struct GenerateReportRequest {
-    date: String,
-    #[serde(default)]
-    force: Option<bool>,
-    #[serde(default)]
-    locale: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
 struct ExportReportRequest {
     date: String,
     #[serde(default)]
@@ -132,15 +123,6 @@ impl HttpResponse {
                 "error": message.into(),
             }),
         )
-    }
-
-    fn text(status: u16, message: impl Into<String>) -> Self {
-        Self {
-            status,
-            reason: reason_phrase(status),
-            content_type: "text/plain; charset=utf-8",
-            body: message.into().into_bytes(),
-        }
     }
 
     fn to_bytes(&self) -> Vec<u8> {

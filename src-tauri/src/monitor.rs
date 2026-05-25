@@ -485,7 +485,7 @@ pub fn normalize_display_app_name(app_name: &str) -> String {
         "iina" => "IINA".to_string(),
         "apple music" | "music" => "Music".to_string(),
         // ── 开发工具 ──
-        "docker desktop" | "docker desktop" => "Docker Desktop".to_string(),
+        "docker desktop" => "Docker Desktop".to_string(),
         "postman" => "Postman".to_string(),
         "insomnia" => "Insomnia".to_string(),
         "fork" | "fork-git-client" => "Fork".to_string(),
@@ -494,7 +494,6 @@ pub fn normalize_display_app_name(app_name: &str) -> String {
         "gitkraken" => "GitKraken".to_string(),
         "tableplus" => "TablePlus".to_string(),
         "navicat" | "navicatpremium" => "Navicat".to_string(),
-        "datagrip" => "DataGrip".to_string(),
         "robomongo" | "robo3t" | "studio 3t" => "MongoDB Compass".to_string(),
         "redis-desktop-manager" | "rdm" => "RedisInsight".to_string(),
         // ── 远程桌面 / SSH ──

@@ -5,7 +5,7 @@ use crate::analysis::report_blocks::{
 };
 use crate::analysis::{
     append_custom_prompt_for_locale, format_duration_for_locale, generate_activity_timeline,
-    generate_hourly_activity_summary_for_locale, generate_session_timeline,
+    generate_hourly_activity_summary_for_locale,
     translate_semantic_category_name, Analyzer, AppLocale, GeneratedReport,
 };
 use crate::config::AiProvider;

@@ -1,3 +1,5 @@
+// avatar_input 中的 Linux/Wayland 函数仅在对应平台编译路径中使用
+// dead_code allow 在 main.rs 的 mod 声明处设置
 use crate::avatar_engine::AvatarInputPayload;
 use once_cell::sync::Lazy;
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU64, AtomicU8, Ordering};

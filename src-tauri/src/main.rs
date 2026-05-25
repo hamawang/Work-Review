@@ -11,6 +11,7 @@ mod analysis;
 mod autostart;
 mod avatar_engine;
 mod avatar_followup;
+#[allow(dead_code)]
 mod avatar_input;
 mod commands;
 mod config;
@@ -943,7 +944,6 @@ struct RecordingLoopDecision {
     reset_capture_clock: bool,
 }
 
-const ACTIVITY_INPUT_IDLE_SUSPECT_MINUTES_DEFAULT: u64 = 5;
 const ACTIVITY_INPUT_IDLE_HARD_STOP_MINUTES: u64 = 20;
 const ACTIVITY_INPUT_IDLE_HARD_STOP_SECS: u64 = ACTIVITY_INPUT_IDLE_HARD_STOP_MINUTES * 60;
 

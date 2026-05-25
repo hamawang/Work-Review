@@ -852,6 +852,7 @@ impl AssistantTool {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 enum AssistantQuestionKind {
     StageSummary,
     OutcomeRecap,
@@ -4145,7 +4146,7 @@ pub async fn update_report_content(
 ) -> Result<(), AppError> {
     let report_locale = AppLocale::from_option(locale.as_deref());
     let locale_code = report_locale.as_code();
-    let mut state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
+    let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
     let existing = state
         .database
         .get_report(&date, Some(locale_code))?

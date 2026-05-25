@@ -33,6 +33,7 @@ data/
 screenshots/
 
 # Live2D SDK / local experiment files (not shipped in release)
+lib/
 public/js/CubismSdkForWeb-*/
 public/js/*.zip
 src-tauri/assets/live2d-models/
