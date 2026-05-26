@@ -46,7 +46,7 @@ test('设置页应提供桌宠连续缩放滑杆', () => {
 
   assert.match(source, /avatar_scale/);
   assert.match(source, /type="range"/);
-  assert.match(source, /min="0\.7"/);
+  assert.match(source, /min="0\.4"/);
   assert.match(source, /max="1\.3"/);
   assert.match(source, /step="0\.05"/);
 });
