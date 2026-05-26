@@ -13,8 +13,6 @@ test('侧边栏应提供编辑部导航框架', async () => {
   assert.match(source, /sidebar-brand-panel/);
   assert.match(source, /sidebar-status-panel/);
   assert.match(source, /sidebar-toolbelt/);
-  assert.match(source, /sidebar-brand-line/);
-  assert.match(source, /sidebar-brand-separator/);
   assert.doesNotMatch(source, /sidebar-brand-chip/);
   assert.doesNotMatch(source, /sidebar-nav-index/);
   assert.match(appCssSource, /\.sidebar-editorial-shell\s*\{[\s\S]*background:\s*transparent;/);
@@ -28,16 +26,13 @@ test('侧边栏应提供编辑部导航框架', async () => {
   assert.match(appCssSource, /\.sidebar-toolbelt\s*\{[\s\S]*border:\s*none;/);
 });
 
-test('侧边栏品牌副标题在英文下应允许换行而不是被硬裁切', async () => {
-  const [source, appCssSource] = await Promise.all([
-    readFile(new URL('./Sidebar.svelte', import.meta.url), 'utf8'),
-    readFile(new URL('../../app.css', import.meta.url), 'utf8'),
-  ]);
+test('侧边栏品牌区不再渲染副标题装饰文字', async () => {
+  // 副标题"记录 · 分析 · 证明"已删除以精简界面，此测试守卫不被无意加回
+  const source = await readFile(new URL('./Sidebar.svelte', import.meta.url), 'utf8');
 
-  assert.match(source, /sidebar-brand-line/);
-  assert.match(source, /sidebar-brand-segment/);
-  assert.match(appCssSource, /\.sidebar-brand-line\b[\s\S]*flex-wrap:/);
-  assert.match(appCssSource, /\.sidebar-brand-segment\b/);
+  assert.doesNotMatch(source, /sidebar-brand-line/);
+  assert.doesNotMatch(source, /sidebar-brand-segment/);
+  assert.doesNotMatch(source, /sidebar\.tagline/);
 });
 
 test('侧边栏激活态高亮条应位于图标区外侧，避免与导航图标重叠', async () => {

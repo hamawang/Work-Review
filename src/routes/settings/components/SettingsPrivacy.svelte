@@ -13,6 +13,8 @@
   // 内联输入状态
   let showAppInput = false;
   let selectedApp = '';
+  // 「内容过滤」（敏感词 + 域名黑名单）默认折叠，属于进阶配置
+  let showContentFilter = false;
   let selectedLevel = 'ignored';
   let batchSelectedApps = new Set();
   let appSearchQuery = '';
@@ -309,11 +311,26 @@
 
     <hr class="border-slate-200 dark:border-slate-700" />
 
-    <!-- 内容过滤（合并敏感词 + 域名黑名单） -->
+    <!-- 内容过滤（合并敏感词 + 域名黑名单），默认折叠 -->
     <div>
-      <span class="settings-text block mb-1">{t('settingsPrivacy.contentFilter')}</span>
-      <p class="settings-muted mb-4">{t('settingsPrivacy.contentFilterDesc')}</p>
-      
+      <button
+        type="button"
+        on:click={() => showContentFilter = !showContentFilter}
+        class="flex items-center justify-between w-full text-left"
+      >
+        <span class="settings-text block">{t('settingsPrivacy.contentFilter')}</span>
+        <svg
+          class="w-4 h-4 text-slate-400 transition-transform {showContentFilter ? 'rotate-180' : ''}"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      <p class="settings-muted mt-1 mb-4">{t('settingsPrivacy.contentFilterDesc')}</p>
+
+      {#if showContentFilter}
       <!-- 敏感词 -->
       <div class="mb-4">
         <div class="flex items-center justify-between mb-2">
@@ -413,6 +430,7 @@
         <!-- 域名黑名单格式说明 -->
         <p class="settings-note">{t('settingsPrivacy.domainHint')}</p>
       </div>
+      {/if}
     </div>
   </div>
 </div>

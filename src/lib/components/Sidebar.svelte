@@ -27,10 +27,6 @@
     currentLocale;
     return t(key, params);
   };
-  $: sidebarTagSegments = translate('sidebar.tagline')
-    .split('·')
-    .map((item) => item.trim())
-    .filter(Boolean);
   const localeOptionsBase = [
     { value: 'zh-CN', label: 'ZH', fullLabelKey: 'sidebar.localeNames.zhCN' },
     { value: 'zh-TW', label: 'TW', fullLabelKey: 'sidebar.localeNames.zhTW' },
@@ -111,14 +107,6 @@
           </div>
           <div class="min-w-0">
             <h1 class="sidebar-brand-title">Work Review</h1>
-            <p class="sidebar-brand-line" aria-label={translate('sidebar.tagline')}>
-              {#each sidebarTagSegments as segment, index}
-                <span class="sidebar-brand-segment">{segment}</span>
-                {#if index < sidebarTagSegments.length - 1}
-                  <span class="sidebar-brand-separator">·</span>
-                {/if}
-              {/each}
-            </p>
           </div>
         </div>
       </div>

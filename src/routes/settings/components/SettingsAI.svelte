@@ -391,9 +391,6 @@
           <option value={provider.id}>{provider.name}</option>
         {/each}
       </select>
-      {#if currentProvider?.description}
-        <p class="settings-note mt-1">{currentProvider.description}</p>
-      {/if}
     </div>
 
     <!-- API 地址 -->
