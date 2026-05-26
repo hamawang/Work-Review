@@ -3340,6 +3340,8 @@ async fn main() {
             commands::get_saved_report,
             commands::update_report_content,
             commands::export_report_markdown,
+            commands::export_timeline_json,
+            commands::export_reports_range,
             commands::get_localhost_api_status,
             commands::get_node_gateway_status,
             commands::get_telegram_bot_status,

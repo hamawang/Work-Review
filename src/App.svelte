@@ -20,6 +20,11 @@
   import { preloadAppIcons } from './lib/stores/iconCache.js';
   import { runUpdateFlow } from './lib/utils/updater.js';
 
+  // 开发态调试日志：生产构建不输出，避免污染用户控制台
+  const devLog = (...args) => {
+    if (import.meta.env.DEV) console.log(...args);
+  };
+
   const appWindow = getCurrentWebviewWindow();
   const currentWindowLabel = appWindow.label;
   const isAvatarWindow = currentWindowLabel === 'avatar';
@@ -63,7 +68,7 @@
 
   // 预加载核心数据
   async function preloadApp() {
-    console.log('开始预加载数据...');
+    devLog('开始预加载数据...');
     const today = getLocalDate();
     
     // 并行预加载：概览、时间线(今天)、日报(今天)
@@ -99,7 +104,7 @@
         if (report) cache.setReport(`${today}:${$locale}`, report);
       })
     ]).then(() => {
-      console.log('预加载完成');
+      devLog('预加载完成');
     }).catch(e => {
       console.warn('预加载部分失败:', e);
     });
@@ -257,7 +262,7 @@
       // 获取平台信息
       try {
         platform = await invoke('get_platform');
-        console.log('当前平台:', platform);
+        devLog('当前平台:', platform);
       } catch (e) {
         console.error('获取平台信息失败:', e);
       }
@@ -388,13 +393,13 @@
             // 检查今日是否已有日报
             const existingReport = await invoke('get_saved_report', { date: today });
             if (!existingReport) {
-              console.log('工作结束时间到达，自动生成日报...');
+              devLog('工作结束时间到达，自动生成日报...');
               autoGenRunning = true;
               try {
                 await invoke('generate_report', { date: today, force: false, locale: currentLocale });
                 cache.invalidate('report', `${today}:${currentLocale}`);
                 lastAutoGenDate = today;
-                console.log('日报自动生成完成');
+                devLog('日报自动生成完成');
               } finally {
                 autoGenRunning = false;
               }
@@ -409,7 +414,7 @@
       pendingCleanup.push(() => clearInterval(autoReportTimer));
 
       const unlisten = await listen('screenshot-taken', (event) => {
-        console.log('截屏完成:', event.payload);
+        devLog('截屏完成:', event.payload);
 
         // 1. 增量更新时间线缓存
         cache.addActivity(event.payload);

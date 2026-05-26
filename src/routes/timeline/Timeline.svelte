@@ -3,6 +3,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { open } from '@tauri-apps/plugin-shell';
+  import { ask, save as saveDialog } from '@tauri-apps/plugin-dialog';
   import { cache } from '../../lib/stores/cache.js';
   import { showToast } from '../../lib/stores/toast.js';
   import { appIconStore, getIconCacheKey, preloadAppIcons } from '../../lib/stores/iconCache.js';
@@ -731,6 +732,45 @@
     }
   }
 
+  let exportingTimeline = false;
+
+  // 导出当前日期的时间线为 JSON
+  // OCR 文本可能含屏幕内容，弹一个确认让用户选择是否一并导出
+  async function exportTimelineJson() {
+    if (exportingTimeline) return;
+    if (!activities.length) {
+      showToast(t('timeline.exportNothing'), 'error');
+      return;
+    }
+
+    const includeOcr = await ask(t('timeline.exportIncludeOcrMessage'), {
+      title: t('timeline.exportIncludeOcrTitle'),
+      kind: 'info',
+      okLabel: t('timeline.exportIncludeOcrYes'),
+      cancelLabel: t('timeline.exportIncludeOcrNo'),
+    });
+
+    const targetPath = await saveDialog({
+      defaultPath: `timeline-${selectedDate}.json`,
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+    });
+    if (!targetPath) return;
+
+    exportingTimeline = true;
+    try {
+      const savedPath = await invoke('export_timeline_json', {
+        date: selectedDate,
+        targetPath,
+        includeOcr,
+      });
+      showToast(t('timeline.exportSuccess', { path: savedPath }), 'success');
+    } catch (e) {
+      showToast(t('timeline.exportFailed', { error: e }), 'error');
+    } finally {
+      exportingTimeline = false;
+    }
+  }
+
   // 删除自定义分类
   let pendingDeleteCategory = null; // { key, name }
   function cancelDeleteCategory() { pendingDeleteCategory = null; }
@@ -814,6 +854,8 @@
         clockInterval = null;
       } else {
         currentTime = new Date();
+        // 防御性清理：visible 路径前若残留 interval 也先清掉，避免双倍触发
+        if (clockInterval) clearInterval(clockInterval);
         clockInterval = setInterval(() => {
           currentTime = new Date();
         }, 1000);
@@ -885,6 +927,20 @@
         <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
         </svg>
+      </button>
+      <button
+        class="page-control-btn-icon"
+        on:click={exportTimelineJson}
+        disabled={exportingTimeline || !activities.length}
+        title={t('timeline.exportTitle')}
+      >
+        {#if exportingTimeline}
+          <div class="animate-spin rounded-full h-4 w-4 border-2 border-current border-t-transparent"></div>
+        {:else}
+          <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3M5 20h14a2 2 0 002-2V9a2 2 0 00-2-2h-4l-2-2H5a2 2 0 00-2 2v11a2 2 0 002 2z" />
+          </svg>
+        {/if}
       </button>
     </div>
   </div>

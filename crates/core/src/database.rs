@@ -1791,6 +1791,46 @@ impl Database {
         Ok(dates)
     }
 
+    /// 按日期范围查询日报（升序）
+    ///
+    /// `start_date` / `end_date` 用 ISO `YYYY-MM-DD` 字符串比较即可（lexicographic 与日期顺序一致）。
+    /// 用于批量导出场景，无匹配返回空 Vec（由调用方决定是否报错）。
+    pub fn get_reports_in_range(
+        &self,
+        start_date: &str,
+        end_date: &str,
+        locale: Option<&str>,
+    ) -> Result<Vec<DailyReport>> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let locale = locale.unwrap_or("zh-CN");
+
+        let mut stmt = conn.prepare(
+            "SELECT date, locale, content, ai_mode, model_name, fallback_reason, created_at
+             FROM daily_reports_localized
+             WHERE date >= ?1 AND date <= ?2 AND locale = ?3
+             ORDER BY date ASC",
+        )?;
+
+        let reports: Vec<DailyReport> = stmt
+            .query_map(params![start_date, end_date, locale], |row| {
+                Ok(DailyReport {
+                    date: row.get(0)?,
+                    locale: row.get(1)?,
+                    content: row.get(2)?,
+                    ai_mode: row.get(3)?,
+                    model_name: row.get(4)?,
+                    fallback_reason: row.get(5)?,
+                    created_at: row.get(6)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(reports)
+    }
+
     /// 保存小时摘要
     pub fn save_hourly_summary(&self, summary: &HourlySummary) -> Result<i64> {
         let conn = self.conn.lock().map_err(|e| {

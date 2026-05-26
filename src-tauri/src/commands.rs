@@ -4215,6 +4215,168 @@ pub async fn export_report_markdown(
     export_report_markdown_inner(date, content, export_dir, state.inner())
 }
 
+/// 导出指定日期的时间线为 JSON 文件
+///
+/// - 复用 `get_timeline_inner` 的隐私过滤（忽略应用 / 排除域名）
+/// - `include_ocr = false` 时，OCR 文本会被清空，避免泄露屏幕内容
+/// - 写入路径为用户选择的 `target_path`，必须以 `.json` 结尾
+pub(crate) fn export_timeline_json_inner(
+    date: String,
+    target_path: String,
+    include_ocr: bool,
+    state: &Arc<Mutex<AppState>>,
+) -> Result<String, AppError> {
+    let target = target_path.trim();
+    if target.is_empty() {
+        return Err(AppError::Config("请先选择导出文件路径".to_string()));
+    }
+    let target_path_buf = PathBuf::from(target);
+
+    // 走完整时间线（不分页），并应用隐私过滤
+    let mut activities = get_timeline_inner(date.clone(), None, None, state)?;
+    if !include_ocr {
+        for a in activities.iter_mut() {
+            a.ocr_text = None;
+        }
+    }
+
+    // 父目录可能不存在（用户选了新位置），尝试创建
+    if let Some(parent) = target_path_buf.parent() {
+        if !parent.as_os_str().is_empty() && !parent.exists() {
+            std::fs::create_dir_all(parent)?;
+        }
+    }
+
+    let payload = serde_json::json!({
+        "version": 1,
+        "date": date,
+        "exported_at": chrono::Local::now().to_rfc3339(),
+        "include_ocr": include_ocr,
+        "count": activities.len(),
+        "activities": activities,
+    });
+    let serialized = serde_json::to_string_pretty(&payload)
+        .map_err(|e| AppError::Unknown(format!("序列化时间线失败: {e}")))?;
+    std::fs::write(&target_path_buf, serialized)?;
+    Ok(target_path_buf.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub async fn export_timeline_json(
+    date: String,
+    target_path: String,
+    include_ocr: Option<bool>,
+    state: State<'_, Arc<Mutex<AppState>>>,
+) -> Result<String, AppError> {
+    export_timeline_json_inner(
+        date,
+        target_path,
+        include_ocr.unwrap_or(false),
+        state.inner(),
+    )
+}
+
+/// 验证 ISO `YYYY-MM-DD` 日期字符串
+fn ensure_iso_date(value: &str, field: &str) -> Result<(), AppError> {
+    chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d")
+        .map(|_| ())
+        .map_err(|_| AppError::Config(format!("{field} 日期格式应为 YYYY-MM-DD")))
+}
+
+/// 将范围内的日报合并成一个 Markdown 文件
+///
+/// - 范围按 ISO 日期字符串比较（lexicographic 与日期序一致）
+/// - locale 默认 zh-CN，与 `get_report` 一致
+/// - 范围内一个日报都没有时返回错误，避免写出空文件让用户困惑
+pub(crate) fn export_reports_range_inner(
+    start_date: String,
+    end_date: String,
+    target_path: String,
+    locale: Option<String>,
+    state: &Arc<Mutex<AppState>>,
+) -> Result<(String, usize), AppError> {
+    let start = start_date.trim();
+    let end = end_date.trim();
+    let target = target_path.trim();
+    if start.is_empty() || end.is_empty() {
+        return Err(AppError::Config("起止日期不能为空".to_string()));
+    }
+    if target.is_empty() {
+        return Err(AppError::Config("请先选择导出文件路径".to_string()));
+    }
+    ensure_iso_date(start, "起始")?;
+    ensure_iso_date(end, "结束")?;
+    if start > end {
+        return Err(AppError::Config("起始日期不能晚于结束日期".to_string()));
+    }
+
+    let locale_code = locale
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("zh-CN")
+        .to_string();
+
+    let reports = {
+        let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
+        state
+            .database
+            .get_reports_in_range(start, end, Some(&locale_code))?
+    };
+
+    if reports.is_empty() {
+        return Err(AppError::Config(format!(
+            "{start} 至 {end} 范围内未找到日报"
+        )));
+    }
+
+    let mut markdown = String::new();
+    markdown.push_str("# 工作日报合并导出\n\n");
+    markdown.push_str(&format!("- 日期范围：{start} ~ {end}\n"));
+    markdown.push_str(&format!(
+        "- 导出时间：{}\n",
+        chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
+    ));
+    markdown.push_str(&format!("- 日报数量：{}\n", reports.len()));
+    markdown.push_str(&format!("- 语言：{locale_code}\n\n"));
+    markdown.push_str("---\n\n");
+
+    for report in &reports {
+        markdown.push_str(&format!("## {}\n\n", report.date));
+        markdown.push_str(report.content.trim());
+        markdown.push_str("\n\n---\n\n");
+    }
+
+    let target_path_buf = PathBuf::from(target);
+    if let Some(parent) = target_path_buf.parent() {
+        if !parent.as_os_str().is_empty() && !parent.exists() {
+            std::fs::create_dir_all(parent)?;
+        }
+    }
+    std::fs::write(&target_path_buf, markdown)?;
+    Ok((target_path_buf.to_string_lossy().to_string(), reports.len()))
+}
+
+#[tauri::command]
+pub async fn export_reports_range(
+    start_date: String,
+    end_date: String,
+    target_path: String,
+    locale: Option<String>,
+    state: State<'_, Arc<Mutex<AppState>>>,
+) -> Result<ExportReportsRangeResult, AppError> {
+    let (path, count) =
+        export_reports_range_inner(start_date, end_date, target_path, locale, state.inner())?;
+    Ok(ExportReportsRangeResult { path, count })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportReportsRangeResult {
+    pub path: String,
+    pub count: usize,
+}
+
 /// 获取配置
 #[tauri::command]
 pub async fn get_config(state: State<'_, Arc<Mutex<AppState>>>) -> Result<AppConfig, AppError> {

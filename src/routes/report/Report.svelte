@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
-  import { open as openDialog } from '@tauri-apps/plugin-dialog';
+  import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
   import { open } from '@tauri-apps/plugin-shell';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
@@ -266,6 +266,96 @@
     }
   }
 
+  // ===== 批量日报合并导出 =====
+  let showBatchExportModal = false;
+  let batchExporting = false;
+  let batchStartDate = '';
+  let batchEndDate = '';
+
+  // ISO 日期字符串工具（避开 toISOString 的 UTC 时区坑）
+  function toIsoDate(date) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  // 计算"本周/上周"的范围，约定周一为一周开始
+  // 注：getDay() 周日=0，周一=1，所以 (day + 6) % 7 是距离本周一的天数
+  function weekRange(offsetWeeks) {
+    const today = new Date();
+    const dayFromMonday = (today.getDay() + 6) % 7;
+    const monday = new Date(today);
+    monday.setDate(today.getDate() - dayFromMonday + offsetWeeks * 7);
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    return { start: toIsoDate(monday), end: toIsoDate(sunday) };
+  }
+
+  function monthRange(offsetMonths) {
+    const today = new Date();
+    const start = new Date(today.getFullYear(), today.getMonth() + offsetMonths, 1);
+    const end = new Date(today.getFullYear(), today.getMonth() + offsetMonths + 1, 0);
+    return { start: toIsoDate(start), end: toIsoDate(end) };
+  }
+
+  function applyBatchPreset(preset) {
+    let range;
+    if (preset === 'thisWeek') range = weekRange(0);
+    else if (preset === 'lastWeek') range = weekRange(-1);
+    else if (preset === 'thisMonth') range = monthRange(0);
+    else if (preset === 'lastMonth') range = monthRange(-1);
+    if (range) {
+      batchStartDate = range.start;
+      batchEndDate = range.end;
+    }
+  }
+
+  function openBatchExportModal() {
+    // 默认填本月范围，省一步点击
+    if (!batchStartDate || !batchEndDate) {
+      applyBatchPreset('thisMonth');
+    }
+    showBatchExportModal = true;
+  }
+
+  async function exportReportsRange() {
+    if (batchExporting) return;
+    if (!batchStartDate || !batchEndDate) {
+      showToast(t('report.batchExportInvalidRange'), 'error');
+      return;
+    }
+    if (batchStartDate > batchEndDate) {
+      showToast(t('report.batchExportInvalidRange'), 'error');
+      return;
+    }
+
+    const targetPath = await saveDialog({
+      defaultPath: `reports-${batchStartDate}_to_${batchEndDate}.md`,
+      filters: [{ name: 'Markdown', extensions: ['md'] }],
+    });
+    if (!targetPath) return;
+
+    batchExporting = true;
+    try {
+      const result = await invoke('export_reports_range', {
+        startDate: batchStartDate,
+        endDate: batchEndDate,
+        targetPath,
+        locale: currentLocale,
+      });
+      showToast(
+        t('report.batchExportSuccess', { path: result.path, count: result.count }),
+        'success',
+      );
+      showBatchExportModal = false;
+    } catch (e) {
+      showToast(t('report.batchExportFailed', { error: e }), 'error');
+    } finally {
+      batchExporting = false;
+    }
+  }
+
   function renderMarkdown(content) {
     const rawHtml = marked(content);
     return DOMPurify.sanitize(rawHtml);
@@ -478,6 +568,14 @@
             {:else}
               {t('report.exportMarkdown')}
             {/if}
+          </button>
+          <button
+            class="page-action-secondary min-h-10 px-4 py-2"
+            on:click={openBatchExportModal}
+            disabled={batchExporting}
+            title={t('report.batchExportTitle')}
+          >
+            {t('report.batchExport')}
           </button>
           <button
             class="page-action-warn"
@@ -849,6 +947,77 @@
             </span>
           {:else}
             {t('report.saveSection')}
+          {/if}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if showBatchExportModal}
+  <div class="modal-overlay" on:click|self={() => { if (!batchExporting) showBatchExportModal = false; }}>
+    <div class="modal-panel" style="max-width: 32rem;" on:click|stopPropagation>
+      <div class="modal-header">
+        <h3 class="modal-title">{t('report.batchExportModalTitle')}</h3>
+        <button
+          class="modal-close"
+          on:click={() => { if (!batchExporting) showBatchExportModal = false; }}
+          disabled={batchExporting}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+      <div class="modal-body space-y-4">
+        <p class="text-xs text-slate-500 dark:text-slate-400">{t('report.batchExportHint')}</p>
+
+        <div class="flex flex-wrap gap-2">
+          <button class="page-control-btn" on:click={() => applyBatchPreset('thisWeek')}>{t('report.batchPresetThisWeek')}</button>
+          <button class="page-control-btn" on:click={() => applyBatchPreset('lastWeek')}>{t('report.batchPresetLastWeek')}</button>
+          <button class="page-control-btn" on:click={() => applyBatchPreset('thisMonth')}>{t('report.batchPresetThisMonth')}</button>
+          <button class="page-control-btn" on:click={() => applyBatchPreset('lastMonth')}>{t('report.batchPresetLastMonth')}</button>
+        </div>
+
+        <div class="grid gap-3 grid-cols-2">
+          <label class="block">
+            <span class="text-xs font-medium text-slate-500 dark:text-slate-400">{t('report.batchStartDate')}</span>
+            <input
+              type="date"
+              bind:value={batchStartDate}
+              max={getLocalDateString()}
+              class="mt-1 w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+            />
+          </label>
+          <label class="block">
+            <span class="text-xs font-medium text-slate-500 dark:text-slate-400">{t('report.batchEndDate')}</span>
+            <input
+              type="date"
+              bind:value={batchEndDate}
+              max={getLocalDateString()}
+              class="mt-1 w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+            />
+          </label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button
+          class="px-4 py-2 text-sm font-medium rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+          on:click={() => { if (!batchExporting) showBatchExportModal = false; }}
+          disabled={batchExporting}
+        >
+          {t('report.cancelEdit')}
+        </button>
+        <button
+          class="px-4 py-2 text-sm font-medium rounded-lg bg-indigo-500 hover:bg-indigo-600 text-white shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          on:click={exportReportsRange}
+          disabled={batchExporting || !batchStartDate || !batchEndDate}
+        >
+          {#if batchExporting}
+            <span class="inline-flex items-center gap-1.5">
+              <span class="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+              {t('report.batchExporting')}
+            </span>
+          {:else}
+            {t('report.batchExportConfirm')}
           {/if}
         </button>
       </div>
