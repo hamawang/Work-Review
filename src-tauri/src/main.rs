@@ -7,6 +7,7 @@
 extern crate objc;
 
 mod activity_classifier;
+mod agent;
 mod analysis;
 mod autostart;
 mod avatar_engine;

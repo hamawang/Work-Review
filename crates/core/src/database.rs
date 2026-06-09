@@ -3,7 +3,7 @@ use chrono::{Local, MappedLocalTime, NaiveDateTime, TimeZone};
 use rusqlite::{params, Connection, Row};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 /// 安全地将 NaiveDateTime 转换为本地时间戳
 /// 在 DST 跳变时不会 panic：
@@ -416,8 +416,19 @@ fn pick_excerpt(candidates: &[String]) -> String {
 }
 
 /// 数据库管理器
+///
+/// 内部用 `Arc<Mutex<Connection>>` 实现廉价 Clone，
+/// 使得 Database 可以跨 async 边界共享（Agent 架构 Stage 6）。
 pub struct Database {
-    conn: Mutex<Connection>,
+    conn: Arc<Mutex<Connection>>,
+}
+
+impl Clone for Database {
+    fn clone(&self) -> Self {
+        Self {
+            conn: Arc::clone(&self.conn),
+        }
+    }
 }
 
 impl Database {
@@ -429,7 +440,7 @@ impl Database {
 
         let conn = Connection::open(db_path)?;
         let db = Self {
-            conn: Mutex::new(conn),
+            conn: Arc::new(Mutex::new(conn)),
         };
         db.init_tables()?;
         Ok(db)

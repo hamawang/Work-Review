@@ -501,56 +501,61 @@ fn is_text_model_available(model_config: &ModelConfig) -> bool {
 }
 
 /// 从问题中提取时间范围关键词，返回 (date_from, date_to)
-fn parse_temporal_range(question: &str) -> (Option<String>, Option<String>) {
+///
+/// 支持同时匹配多个时间段关键词，合并为最宽的日期范围。
+/// 例如"这个月和上个月" → (上月1号, 今天)。
+pub fn parse_temporal_range(question: &str) -> (Option<String>, Option<String>) {
     use chrono::{Datelike, Local};
 
     let normalized = question.trim().to_lowercase();
     let today = Local::now().date_naive();
     let fmt = |d: chrono::NaiveDate| d.format("%Y-%m-%d").to_string();
 
+    // 收集所有匹配的时间段，最后合并
+    let mut ranges: Vec<(chrono::NaiveDate, chrono::NaiveDate)> = Vec::new();
+
     // 今天/今日
     if normalized.contains("今天") || normalized.contains("今日") {
-        let d = fmt(today);
-        return (Some(d.clone()), Some(d));
+        ranges.push((today, today));
     }
 
     // 昨天/昨日
     if normalized.contains("昨天") || normalized.contains("昨日") {
-        let d = fmt(today - chrono::Duration::days(1));
-        return (Some(d.clone()), Some(d));
+        let d = today - chrono::Duration::days(1);
+        ranges.push((d, d));
     }
 
     // 前天
     if normalized.contains("前天") {
-        let d = fmt(today - chrono::Duration::days(2));
-        return (Some(d.clone()), Some(d));
+        let d = today - chrono::Duration::days(2);
+        ranges.push((d, d));
     }
 
-    // 最近N天/近N天/过去N天 — 用 regex 提取数字
+    // 最近N天/近N天/过去N天 — 用 regex 提取所有数字
     if let Ok(re) = regex::Regex::new(r"(?:最近|近|过去)\s*(\d+)\s*天") {
-        if let Some(caps) = re.captures(&normalized) {
+        for caps in re.captures_iter(&normalized) {
             if let Ok(n) = caps[1].parse::<i64>() {
-                return (
-                    Some(fmt(today - chrono::Duration::days(n))),
-                    Some(fmt(today)),
-                );
+                ranges.push((today - chrono::Duration::days(n), today));
             }
         }
     }
 
-    // 含"最近"但无数字 → 默认 7 天
+    // 含"最近"但无数字 → 默认 7 天（避免与"最近N天"重复：只有当无数字匹配时才追加）
     if normalized.contains("最近") {
-        return (
-            Some(fmt(today - chrono::Duration::days(7))),
-            Some(fmt(today)),
-        );
+        let has_numeric = regex::Regex::new(r"最近\s*\d+\s*天")
+            .ok()
+            .map(|re| re.is_match(&normalized))
+            .unwrap_or(false);
+        if !has_numeric {
+            ranges.push((today - chrono::Duration::days(7), today));
+        }
     }
 
     // 本周/这周
     if normalized.contains("本周") || normalized.contains("这周") {
         let wd = today.weekday().num_days_from_monday() as i64;
         let monday = today - chrono::Duration::days(wd);
-        return (Some(fmt(monday)), Some(fmt(today)));
+        ranges.push((monday, today));
     }
 
     // 上周/上一周
@@ -559,13 +564,13 @@ fn parse_temporal_range(question: &str) -> (Option<String>, Option<String>) {
         let this_monday = today - chrono::Duration::days(wd);
         let last_monday = this_monday - chrono::Duration::days(7);
         let last_sunday = this_monday - chrono::Duration::days(1);
-        return (Some(fmt(last_monday)), Some(fmt(last_sunday)));
+        ranges.push((last_monday, last_sunday));
     }
 
     // 本月/这个月
     if normalized.contains("本月") || normalized.contains("这个月") {
         let first = today.with_day(1).unwrap_or(today);
-        return (Some(fmt(first)), Some(fmt(today)));
+        ranges.push((first, today));
     }
 
     // 上月/上个月
@@ -573,10 +578,18 @@ fn parse_temporal_range(question: &str) -> (Option<String>, Option<String>) {
         let first_this = today.with_day(1).unwrap_or(today);
         let last_day_prev = first_this - chrono::Duration::days(1);
         let first_prev = last_day_prev.with_day(1).unwrap_or(last_day_prev);
-        return (Some(fmt(first_prev)), Some(fmt(last_day_prev)));
+        ranges.push((first_prev, last_day_prev));
     }
 
-    (None, None)
+    if ranges.is_empty() {
+        return (None, None);
+    }
+
+    // 合并所有范围：取最早的开始日期和最晚的结束日期
+    let earliest = ranges.iter().map(|(s, _)| *s).min().unwrap_or(today);
+    let latest = ranges.iter().map(|(_, e)| *e).max().unwrap_or(today);
+
+    (Some(fmt(earliest)), Some(fmt(latest)))
 }
 
 /// Parse a single date from user input for bot commands (e.g. `/report 昨天`).
@@ -3560,7 +3573,12 @@ pub async fn ask_memory(
     })
 }
 
-/// 统一工作助手
+/// 统一工作助手（Stage 6: 已接入 Agent Orchestrator）
+///
+/// 接口签名保持不变，内部实现替换为 Agentic 架构：
+/// - 简单查询 → FastPath（规则 + 模板）
+/// - 复杂查询 → AgentPath（LLM 自主决策 + 多轮工具调用）
+/// - 无模型   → FallbackPath（纯模板回答）
 #[tauri::command]
 pub async fn chat_work_assistant(
     question: String,
@@ -3574,6 +3592,7 @@ pub async fn chat_work_assistant(
     let trimmed_question = question.trim().to_string();
     let history = history.unwrap_or_default();
     let assistant_locale = AppLocale::from_option(locale.as_deref());
+
     if trimmed_question.is_empty() {
         return Ok(AssistantAnswer {
             answer: assistant_empty_question_message(assistant_locale).to_string(),
@@ -3585,154 +3604,41 @@ pub async fn chat_work_assistant(
         });
     }
 
-    // 时间范围：前端传入优先，否则从问题中自动提取
-    let (date_from, date_to) = if date_from.is_some() || date_to.is_some() {
-        (date_from, date_to)
-    } else {
-        let (auto_from, auto_to) = parse_temporal_range(&trimmed_question);
-        (auto_from, auto_to)
-    };
-
-    let reasoning_mode = assistant_reasoning_mode(model_config.as_ref());
-    let question_kind =
-        detect_assistant_question_kind_with_mode(&trimmed_question, &history, reasoning_mode);
-    let tools = detect_assistant_tools_with_history(&trimmed_question, &history, reasoning_mode);
-    let search_query = build_contextual_query(&trimmed_question, &history);
-    let (references, sessions, intents, review, todos) = {
-        let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
-        let references = state.database.search_memory(
-            &search_query,
-            date_from.as_deref(),
-            date_to.as_deref(),
-            8,
-        )?;
-
-        let needs_activity_data = tools.iter().any(|tool| {
-            matches!(
-                tool,
-                AssistantTool::Sessions
-                    | AssistantTool::Intents
-                    | AssistantTool::Review
-                    | AssistantTool::Todos
-            )
-        });
-
-        let activities = if needs_activity_data {
-            Some(load_filtered_activities_in_range(
-                &state,
-                date_from.as_deref(),
-                date_to.as_deref(),
-                5000,
-            )?)
-        } else {
-            None
-        };
-
-        let sessions = if tools.contains(&AssistantTool::Sessions) {
-            activities.as_ref().map(|items| build_work_sessions(items))
-        } else {
-            None
-        };
-
-        let intents = if tools.contains(&AssistantTool::Intents) {
-            activities.as_ref().map(|items| analyze_intents(items))
-        } else {
-            None
-        };
-
-        let review = if tools.contains(&AssistantTool::Review) {
-            activities
-                .as_ref()
-                .map(|items| build_weekly_review(items, date_from.as_deref(), date_to.as_deref()))
-        } else {
-            None
-        };
-
-        let todos = if tools.contains(&AssistantTool::Todos) {
-            Some(merge_manual_followups_into_todos(
-                activities
-                    .as_ref()
-                    .map(|items| extract_todos(items))
-                    .unwrap_or_else(|| TodoExtractionResult {
-                        items: Vec::new(),
-                        summary: "当前时间范围内没有提取到明确的待办信号。".to_string(),
-                    }),
-                &state.config.avatar_followups,
-                date_from.as_deref(),
-                date_to.as_deref(),
-            ))
-        } else {
-            None
-        };
-
-        (references, sessions, intents, review, todos)
-    };
-
-    let tool_labels = tools
+    // 将前端历史转为 Agent 内部的 Message 格式（保留 role）
+    let agent_history: Vec<crate::agent::Message> = history
         .iter()
-        .map(|tool| tool.label().to_string())
-        .collect::<Vec<_>>();
-    let cards = build_assistant_cards(
-        sessions.as_deref(),
-        intents.as_ref(),
-        review.as_ref(),
-        todos.as_ref(),
-    );
-
-    // model_config: None = basic template (no AI), Some = AI enhanced
-    if let Some(ref ai_model) = model_config {
-        if is_text_model_available(ai_model) {
-            let prompt = build_assistant_prompt(
-                &trimmed_question,
-                question_kind,
-                &history,
-                date_from.as_deref(),
-                date_to.as_deref(),
-                &references,
-                sessions.as_deref(),
-                intents.as_ref(),
-                review.as_ref(),
-                todos.as_ref(),
-                assistant_locale,
-            );
-
-            let sys = build_assistant_system_prompt(assistant_locale);
-
-            match generate_text_answer_with_model(ai_model, sys, &prompt).await {
-                Ok(answer) => {
-                    return Ok(AssistantAnswer {
-                        answer,
-                        references,
-                        used_ai: true,
-                        model_name: Some(ai_model.model.clone()),
-                        tool_labels,
-                        cards,
-                    });
-                }
-                Err(error) => {
-                    log::warn!("AI generation failed, falling back: {error}");
-                }
+        .map(|m| {
+            if m.role == "assistant" {
+                crate::agent::Message::assistant(&m.content)
+            } else {
+                crate::agent::Message::user(&m.content)
             }
-        }
-    }
+        })
+        .collect();
+
+    // 从 AppState 中 clone Database（Arc 引用计数 +1，可跨 await）
+    let database = {
+        let s = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
+        s.database.clone()
+    };
+
+    // Stage 6: 完整 Orchestrator 集成
+    let result = crate::agent::Orchestrator::handle(
+        &trimmed_question,
+        model_config.as_ref(),
+        &database,
+        &agent_history,
+        None,
+    )
+    .await?;
 
     Ok(AssistantAnswer {
-        answer: build_fallback_assistant_answer(
-            &trimmed_question,
-            question_kind,
-            &references,
-            sessions.as_deref(),
-            intents.as_ref(),
-            review.as_ref(),
-            todos.as_ref(),
-            &tool_labels,
-            assistant_locale,
-        ),
-        references,
-        used_ai: false,
-        model_name: None,
-        tool_labels,
-        cards,
+        answer: result.answer,
+        references: Vec::new(),
+        used_ai: result.used_ai,
+        model_name: model_config.map(|c| c.model.clone()),
+        tool_labels: result.tool_labels,
+        cards: Vec::new(),
     })
 }
 
@@ -8579,6 +8485,7 @@ mod tests {
         build_fallback_assistant_answer, build_updater_manifest_candidates,
         build_windows_icon_cache_key, detect_assistant_question_kind,
         detect_assistant_question_kind_with_mode, export_daily_report_markdown,
+        parse_temporal_range,
         format_browser_url_for_display, macos_score_app_bundle_name,
         merge_windows_icon_lookup_candidates, normalize_macos_app_lookup_name,
         normalize_saved_report_ai_mode, ollama_model_names_match, ollama_model_should_be_listed,
@@ -9438,6 +9345,162 @@ mod tests {
 
         assert!(!answer.contains("../Pycharm_Project/Work_Review/src-tauri"));
         assert!(!answer.contains("无标题 - Google Chrome - momoi"));
+    }
+
+    // ── parse_temporal_range 测试 ──────────────────────────────────
+
+    /// 辅助：获取今天日期字符串
+    fn today_str() -> String {
+        use chrono::Local;
+        Local::now().date_naive().format("%Y-%m-%d").to_string()
+    }
+
+    /// 辅助：获取 N 天前的日期字符串
+    fn days_ago_str(n: i64) -> String {
+        use chrono::Local;
+        let today = Local::now().date_naive();
+        (today - chrono::Duration::days(n))
+            .format("%Y-%m-%d")
+            .to_string()
+    }
+
+    /// 辅助：获取本月1号的日期字符串
+    fn first_of_month_str() -> String {
+        use chrono::{Datelike, Local};
+        let today = Local::now().date_naive();
+        today
+            .with_day(1)
+            .unwrap_or(today)
+            .format("%Y-%m-%d")
+            .to_string()
+    }
+
+    /// 辅助：获取上月1号和上月最后一天的日期字符串
+    fn prev_month_bounds() -> (String, String) {
+        use chrono::{Datelike, Local};
+        let today = Local::now().date_naive();
+        let first_this = today.with_day(1).unwrap_or(today);
+        let last_day_prev = first_this - chrono::Duration::days(1);
+        let first_prev = last_day_prev.with_day(1).unwrap_or(last_day_prev);
+        (
+            first_prev.format("%Y-%m-%d").to_string(),
+            last_day_prev.format("%Y-%m-%d").to_string(),
+        )
+    }
+
+    #[test]
+    fn test_temporal_single_today() {
+        let (from, to) = parse_temporal_range("今天做了什么");
+        assert_eq!(from.as_deref(), Some(today_str().as_str()));
+        assert_eq!(to.as_deref(), Some(today_str().as_str()));
+    }
+
+    #[test]
+    fn test_temporal_single_yesterday() {
+        let (from, to) = parse_temporal_range("昨天做了什么");
+        assert_eq!(from.as_deref(), Some(days_ago_str(1).as_str()));
+        assert_eq!(to.as_deref(), Some(days_ago_str(1).as_str()));
+    }
+
+    #[test]
+    fn test_temporal_single_this_month() {
+        let (from, to) = parse_temporal_range("这个月的工作总结");
+        assert_eq!(from.as_deref(), Some(first_of_month_str().as_str()));
+        assert_eq!(to.as_deref(), Some(today_str().as_str()));
+    }
+
+    #[test]
+    fn test_temporal_single_last_month() {
+        let (from, to) = parse_temporal_range("上个月做了什么");
+        let (prev_first, prev_last) = prev_month_bounds();
+        assert_eq!(from.as_deref(), Some(prev_first.as_str()));
+        assert_eq!(to.as_deref(), Some(prev_last.as_str()));
+    }
+
+    #[test]
+    fn test_temporal_recent_3_days() {
+        let (from, to) = parse_temporal_range("最近3天的工作");
+        assert_eq!(from.as_deref(), Some(days_ago_str(3).as_str()));
+        assert_eq!(to.as_deref(), Some(today_str().as_str()));
+    }
+
+    #[test]
+    fn test_temporal_recent_no_number() {
+        let (from, to) = parse_temporal_range("最近的工作情况");
+        assert_eq!(from.as_deref(), Some(days_ago_str(7).as_str()));
+        assert_eq!(to.as_deref(), Some(today_str().as_str()));
+    }
+
+    #[test]
+    fn test_temporal_no_match() {
+        let (from, to) = parse_temporal_range("帮我分析一下工作效率");
+        assert!(from.is_none());
+        assert!(to.is_none());
+    }
+
+    // ── 多时间段合并测试 ─────────────────────────────────────────
+
+    #[test]
+    fn test_temporal_this_month_plus_last_month() {
+        // 核心场景：问"这个月加上上个月"应返回 (上月1号, 今天)
+        let (from, to) = parse_temporal_range("这个月加上上个月做了什么");
+        let (prev_first, _) = prev_month_bounds();
+        assert_eq!(
+            from.as_deref(),
+            Some(prev_first.as_str()),
+            "起始日期应为上月1号"
+        );
+        assert_eq!(
+            to.as_deref(),
+            Some(today_str().as_str()),
+            "结束日期应为今天"
+        );
+    }
+
+    #[test]
+    fn test_temporal_today_and_yesterday() {
+        let (from, to) = parse_temporal_range("今天和昨天做了什么");
+        assert_eq!(from.as_deref(), Some(days_ago_str(1).as_str()));
+        assert_eq!(to.as_deref(), Some(today_str().as_str()));
+    }
+
+    #[test]
+    fn test_temporal_this_week_and_last_week() {
+        use chrono::{Datelike, Local};
+        let today = Local::now().date_naive();
+        let wd = today.weekday().num_days_from_monday() as i64;
+        let this_monday = today - chrono::Duration::days(wd);
+        let last_monday = this_monday - chrono::Duration::days(7);
+
+        let (from, to) = parse_temporal_range("本周和上周的工作");
+        assert_eq!(
+            from.as_deref(),
+            Some(last_monday.format("%Y-%m-%d").to_string().as_str()),
+            "起始日期应为上周一"
+        );
+        assert_eq!(
+            to.as_deref(),
+            Some(today_str().as_str()),
+            "结束日期应为今天"
+        );
+    }
+
+    #[test]
+    fn test_temporal_this_month_and_last_month_and_yesterday() {
+        // 三个时间段合并：上个月最早，今天最晚
+        let (from, to) = parse_temporal_range("这个月、上个月还有昨天的内容");
+        let (prev_first, _) = prev_month_bounds();
+        assert_eq!(from.as_deref(), Some(prev_first.as_str()));
+        assert_eq!(to.as_deref(), Some(today_str().as_str()));
+    }
+
+    #[test]
+    fn test_temporal_ben_yue_and_shang_yue() {
+        // 用"本月"和"上月"变体关键词
+        let (from, to) = parse_temporal_range("本月和上月有什么区别");
+        let (prev_first, _) = prev_month_bounds();
+        assert_eq!(from.as_deref(), Some(prev_first.as_str()));
+        assert_eq!(to.as_deref(), Some(today_str().as_str()));
     }
 }
 
