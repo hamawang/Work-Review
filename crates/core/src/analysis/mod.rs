@@ -105,6 +105,7 @@ pub fn create_analyzer(
     model: &str,
     api_key: Option<&str>,
     custom_prompt: &str,
+    system_prompt_override: Option<&str>,
     locale: AppLocale,
 ) -> Box<dyn Analyzer + Send + Sync> {
     log::info!(
@@ -128,6 +129,7 @@ pub fn create_analyzer(
             model,
             api_key,
             custom_prompt,
+            system_prompt_override,
             locale,
         )),
         AiMode::Cloud => Box::new(cloud::CloudAnalyzer::new(

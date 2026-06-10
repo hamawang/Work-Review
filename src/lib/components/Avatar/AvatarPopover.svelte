@@ -19,14 +19,15 @@
       ? 'background: rgba(236, 253, 245, 0.98);'
       : 'background: rgba(255, 255, 255, 0.94);';
   $: compactBubbleMessage = !bubbleMessage?.includes('\n') && (bubbleMessage?.trim().length ?? 0) <= 14;
+  // 约束弹框宽度不超出桌宠窗口：88vw 在 276px 窗口内 ≈ 243px，留出边距
   $: bubblePanelStyle = compactBubbleMessage
-    ? 'width: fit-content; min-width: 120px; max-width: min(68vw, 196px);'
-    : 'width: min(88vw, 336px); min-width: 180px; max-width: min(88vw, 336px);';
+    ? 'width: fit-content; min-width: 120px; max-width: min(82vw, 196px);'
+    : 'width: min(82vw, 336px); min-width: 160px; max-width: min(82vw, 336px);';
 </script>
 
 {#if bubble}
   <div class="absolute inset-0 z-20 overflow-visible pointer-events-none">
-    <div class="avatar-popover-anchor absolute right-[8%] top-[8px]">
+    <div class="avatar-popover-anchor absolute right-[6%] top-[8px]">
       <div class="relative overflow-visible">
         <div
           class="pointer-events-auto relative rounded-[16px] border shadow-[0_10px_24px_rgba(15,23,42,0.1),0_3px_10px_rgba(15,23,42,0.05)]"

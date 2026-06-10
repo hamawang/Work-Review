@@ -191,6 +191,9 @@ pub struct DailyStats {
     /// 工作时间内的活动时长（新增）
     #[serde(default)]
     pub work_time_duration: i64,
+    /// 加班时长（秒）：超出标准工时的工作时长
+    #[serde(default)]
+    pub overtime_duration: i64,
     /// 24 小时活跃度分布
     #[serde(default)]
     pub hourly_activity_distribution: Vec<HourlyActivityBucket>,
@@ -1166,6 +1169,9 @@ impl Database {
 
         let mut total_duration: i64 = 0;
         let mut work_time_duration: i64 = 0;
+        let mut after_hours_duration: i64 = 0;
+        // 最后一个工作时段的结束时间戳，用于计算下班后加班时长
+        let last_segment_end_ts = segment_ts.iter().map(|&(_, we)| we).max().unwrap_or(end_ts);
         let mut app_usage_map: std::collections::HashMap<
             String,
             (i64, i64, Option<String>, Option<String>, i64),
@@ -1220,6 +1226,16 @@ impl Database {
                     start_ts,
                     end_ts,
                     &segment_ts,
+                );
+            }
+
+            // 计算下班后（最后工作时段结束后）的活动时长，即加班时长
+            if timestamp > last_segment_end_ts {
+                after_hours_duration += calculate_overlap_duration(
+                    timestamp,
+                    duration,
+                    last_segment_end_ts,
+                    end_ts,
                 );
             }
 
@@ -1489,6 +1505,7 @@ impl Database {
             domain_usage,
             browser_usage,
             work_time_duration,
+            overtime_duration: after_hours_duration,
             hourly_activity_distribution,
         })
     }

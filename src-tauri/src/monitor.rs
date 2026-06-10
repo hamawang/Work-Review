@@ -189,7 +189,8 @@ pub fn is_browser_app(app_name: &str) -> bool {
         || app_lower.contains("liebao")
         || app_lower.contains("maxthon")
         || app_lower.contains("theworld")
-        || app_lower.contains("iexplore");
+        || app_lower.contains("iexplore")
+        || app_lower.contains("tabbit");
     if substring_match {
         return true;
     }
@@ -229,6 +230,8 @@ pub fn clean_browser_window_title(title: &str, app_name: &str) -> String {
         "Arc"
     } else if app_name_lower == "cent" || app_name_lower == "cent browser" || app_name_lower == "centbrowser" {
         "Cent Browser"
+    } else if app_name_lower.contains("tabbit") {
+        "Tabbit"
     } else {
         ""
     };

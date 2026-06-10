@@ -155,6 +155,7 @@ pub struct SummaryAnalyzer {
     model: String,
     api_key: Option<String>,
     custom_prompt: String,
+    system_prompt_override: Option<String>,
     locale: AppLocale,
     client: Client,
 }
@@ -166,6 +167,7 @@ impl SummaryAnalyzer {
         model: &str,
         api_key: Option<&str>,
         custom_prompt: &str,
+        system_prompt_override: Option<&str>,
         locale: AppLocale,
     ) -> Self {
         let client = Client::builder()
@@ -180,6 +182,7 @@ impl SummaryAnalyzer {
             model: model.to_string(),
             api_key: api_key.map(|value| value.to_string()),
             custom_prompt: custom_prompt.to_string(),
+            system_prompt_override: system_prompt_override.map(|s| s.to_string()),
             locale,
             client,
         }
@@ -521,6 +524,11 @@ impl SummaryAnalyzer {
 
         let timeline = generate_activity_timeline(activities, self.locale);
 
+        // 为 override 分支保留引用（base_prompt 构建后会 move 这些变量）
+        let apps_list_for_override = apps_list.clone();
+        let urls_list_for_override = urls_list.clone();
+        let keywords_for_override = top_keywords.clone();
+
         let base_prompt = match self.locale {
             AppLocale::ZhCn => format!(
                 r#"请基于以下数据，生成一份面向用户的工作日报 AI 分析补充。重点是提炼信息和给出洞察，不要逐条复述原始数据。
@@ -677,7 +685,52 @@ Write in English and use exactly these four section headings:
             ),
         };
 
-        append_custom_prompt_for_locale(base_prompt, &self.custom_prompt, self.locale)
+        // 如果用户覆盖了系统提示词模板，则用它替代硬编码的 base_prompt
+        let final_prompt = if let Some(ref override_prompt) = self.system_prompt_override {
+            let trimmed = override_prompt.trim();
+            if trimmed.is_empty() {
+                base_prompt
+            } else {
+                // 将日期和统计数据注入到用户模板中
+                let injected = match self.locale {
+                    AppLocale::ZhCn => format!(
+                        "【日期】\n{}\n\n【今日原始数据】\n工作时长：{}\n主要应用：{}\n访问网站：{}\n按小时活跃度：{}\n屏幕内容关键词：{}\n\n【活动时间线】\n{}",
+                        date,
+                        format_duration_for_locale(stats.total_duration, self.locale),
+                        if apps_list_for_override.is_empty() { empty_value(self.locale).to_string() } else { apps_list_for_override.clone() },
+                        if urls_list_for_override.is_empty() { empty_value(self.locale).to_string() } else { urls_list_for_override.clone() },
+                        hourly_summary,
+                        if keywords_for_override.is_empty() { empty_value(self.locale).to_string() } else { keywords_for_override.clone() },
+                        timeline,
+                    ),
+                    AppLocale::ZhTw => format!(
+                        "【日期】\n{}\n\n【今日原始資料】\n工作時長：{}\n主要應用：{}\n造訪網站：{}\n按小時活躍度：{}\n畫面內容關鍵詞：{}\n\n【活動時間線】\n{}",
+                        date,
+                        format_duration_for_locale(stats.total_duration, self.locale),
+                        if apps_list_for_override.is_empty() { empty_value(self.locale).to_string() } else { apps_list_for_override.clone() },
+                        if urls_list_for_override.is_empty() { empty_value(self.locale).to_string() } else { urls_list_for_override.clone() },
+                        hourly_summary,
+                        if keywords_for_override.is_empty() { empty_value(self.locale).to_string() } else { keywords_for_override.clone() },
+                        timeline,
+                    ),
+                    AppLocale::En => format!(
+                        "[Date]\n{}\n\n[Raw Data]\nWork duration: {}\nTop apps: {}\nWebsites: {}\nHourly activity: {}\nScreen keywords: {}\n\n[Activity Timeline]\n{}",
+                        date,
+                        format_duration_for_locale(stats.total_duration, self.locale),
+                        if apps_list_for_override.is_empty() { empty_value(self.locale).to_string() } else { apps_list_for_override.clone() },
+                        if urls_list_for_override.is_empty() { empty_value(self.locale).to_string() } else { urls_list_for_override.clone() },
+                        hourly_summary,
+                        if keywords_for_override.is_empty() { empty_value(self.locale).to_string() } else { keywords_for_override.clone() },
+                        timeline,
+                    ),
+                };
+                format!("{}\n\n{}", trimmed, injected)
+            }
+        } else {
+            base_prompt
+        };
+
+        append_custom_prompt_for_locale(final_prompt, &self.custom_prompt, self.locale)
     }
 
     fn generate_fallback_ai_content(&self, apps_list: &str) -> String {

@@ -479,6 +479,23 @@
 
     <div class="flex items-center justify-between gap-4">
       <div>
+        <div class="settings-text">{t('settingsAppearance.avatarClickThrough')}</div>
+        <div class="settings-muted mt-1 text-[12px]">{t('settingsAppearance.avatarClickThroughDescription')}</div>
+      </div>
+      <button
+        type="button"
+        on:click={() => { config.avatar_click_through = !config.avatar_click_through; }}
+        class="switch-track {config.avatar_click_through ? 'bg-primary-500' : 'bg-slate-300 dark:bg-slate-600'}"
+        aria-pressed={config.avatar_click_through}
+      >
+        <span class="switch-thumb {config.avatar_click_through ? 'translate-x-5' : 'translate-x-0'}"></span>
+      </button>
+    </div>
+
+    <hr class="border-slate-200 dark:border-slate-700" />
+
+    <div class="flex items-center justify-between gap-4">
+      <div>
         <div class="settings-text">{t('settingsAppearance.breakReminder')}</div>
         <div class="settings-muted mt-1 text-[12px]">{t('settingsAppearance.breakReminderDescription')}</div>
         {#if !config.avatar_enabled}

@@ -286,6 +286,32 @@
       <p class="settings-note">{t('settingsGeneral.workTimeHint')}</p>
       {/if}
 
+      <!-- 标准工时（加班计算基准） -->
+      <div class="flex items-center justify-between mt-3">
+        <div>
+          <span class="settings-text text-sm">{t('settingsGeneral.standardWorkHours')}</span>
+          <p class="settings-muted mt-0.5">{t('settingsGeneral.standardWorkHoursHint')}</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <input
+            type="number"
+            min="1"
+            max="24"
+            step="0.5"
+            value={config.standard_work_hours ?? 8}
+            on:change={(e) => {
+              const val = parseFloat(e.target.value);
+              if (!isNaN(val) && val >= 1 && val <= 24) {
+                config.standard_work_hours = val;
+                handleChange();
+              }
+            }}
+            class="w-20 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-center text-sm font-mono text-slate-800 focus:border-primary-400 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+          />
+          <span class="text-xs text-slate-500 dark:text-slate-400">{t('settingsGeneral.hours')}</span>
+        </div>
+      </div>
+
       <!-- 空闲检测阈值 -->
       <div class="flex items-center justify-between mt-3">
         <div>

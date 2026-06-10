@@ -261,10 +261,45 @@ fn export_daily_report_markdown(
     date: &str,
     content: &str,
 ) -> Result<(), AppError> {
-    std::fs::create_dir_all(export_dir)?;
     let output_path = build_daily_report_export_path(export_dir, date);
-    std::fs::write(output_path, content)?;
-    Ok(())
+    // Retry up to 3 times to handle transient issues (disk busy, antivirus lock, etc.)
+    let mut last_err = None;
+    for attempt in 0..3 {
+        if attempt > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(500 * attempt as u64));
+            log::warn!(
+                "日报自动导出重试第 {} 次: {}",
+                attempt,
+                output_path.display()
+            );
+        }
+        match std::fs::create_dir_all(export_dir) {
+            Ok(()) => {}
+            Err(e) => {
+                last_err = Some(e);
+                continue;
+            }
+        }
+        match std::fs::write(&output_path, content) {
+            Ok(()) => {
+                log::info!(
+                    "日报自动导出成功: {}",
+                    output_path.display()
+                );
+                return Ok(());
+            }
+            Err(e) => {
+                last_err = Some(e);
+                continue;
+            }
+        }
+    }
+    Err(AppError::Unknown(format!(
+        "日报导出失败（已重试3次）: {}",
+        last_err
+            .map(|e| e.to_string())
+            .unwrap_or_else(|| "未知错误".to_string())
+    )))
 }
 
 #[cfg(target_os = "linux")]
@@ -2893,9 +2928,18 @@ fn apply_excluded_domains_to_stats(
 
 fn load_daily_stats_for_overview(state: &AppState, date: &str) -> Result<DailyStats, AppError> {
     let segments = state.config.effective_work_segments();
-    state
+    let mut stats = state
         .database
-        .get_daily_stats_with_segments(date, &segments)
+        .get_daily_stats_with_segments(date, &segments)?;
+
+    // 加班时长：数据库已按秒级精度计算了"最后工作时段结束后的活动量"。
+    // 仅当未启用工作时段（弹性工时）时，退回到标准工时方案。
+    if !state.config.work_time_enabled {
+        let standard_seconds = (state.config.standard_work_hours * 3600.0).round() as i64;
+        stats.overtime_duration = (stats.work_time_duration - standard_seconds).max(0);
+    }
+
+    Ok(stats)
 }
 
 fn overview_week_bounds_for_date(anchor: chrono::NaiveDate) -> (String, String) {
@@ -3021,6 +3065,7 @@ fn sum_daily_stats(days: Vec<DailyStats>) -> DailyStats {
     let mut screenshot_count = 0;
     let mut browser_duration = 0;
     let mut work_time_duration = 0;
+    let mut overtime_duration = 0;
 
     let mut app_usage_map: HashMap<String, AppUsage> = HashMap::new();
     let mut category_usage_map: HashMap<String, i64> = HashMap::new();
@@ -3036,6 +3081,7 @@ fn sum_daily_stats(days: Vec<DailyStats>) -> DailyStats {
         screenshot_count += day.screenshot_count;
         browser_duration += day.browser_duration;
         work_time_duration += day.work_time_duration;
+        overtime_duration += day.overtime_duration;
 
         for app in day.app_usage {
             let entry = app_usage_map
@@ -3159,6 +3205,7 @@ fn sum_daily_stats(days: Vec<DailyStats>) -> DailyStats {
         domain_usage,
         browser_usage,
         work_time_duration,
+        overtime_duration,
         hourly_activity_distribution,
     }
 }
@@ -3825,6 +3872,7 @@ pub(crate) async fn generate_report_inner(
         &config.text_model.model,
         config.text_model.api_key.as_deref(),
         &config.daily_report_custom_prompt,
+        config.daily_report_system_prompt_override.as_deref(),
         report_locale,
     );
 
@@ -3947,7 +3995,14 @@ pub(crate) async fn generate_report_inner(
 
     if config.daily_report_auto_export {
         if let Some(export_dir) = config.daily_report_export_dir.as_deref() {
-            export_daily_report_markdown(Path::new(export_dir), &date, &report)?;
+            if let Err(e) = export_daily_report_markdown(Path::new(export_dir), &date, &report) {
+                log::error!(
+                    "日报自动导出失败（日报已保存到数据库，仅导出文件失败）: {:?}",
+                    e
+                );
+                // Do NOT propagate the error — report is already saved in the database.
+                // Export failure should not make the entire generation appear to have failed.
+            }
         }
     }
 
@@ -4375,6 +4430,7 @@ pub(crate) fn persist_app_config(
         previous_avatar_scale,
         previous_avatar_opacity,
         previous_avatar_preset,
+        previous_avatar_click_through,
         previous_avatar_x,
         previous_avatar_y,
         previous_hide_dock_icon,
@@ -4406,6 +4462,7 @@ pub(crate) fn persist_app_config(
             previous_config.avatar_scale,
             previous_config.avatar_opacity,
             previous_config.avatar_preset,
+            previous_config.avatar_click_through,
             previous_config.avatar_x,
             previous_config.avatar_y,
             previous_config.hide_dock_icon,
@@ -4418,6 +4475,7 @@ pub(crate) fn persist_app_config(
         || previous_avatar_scale != config.avatar_scale
         || previous_avatar_x != config.avatar_x
         || previous_avatar_y != config.avatar_y;
+    let avatar_click_through_changed = previous_avatar_click_through != config.avatar_click_through;
     let avatar_visual_changed = previous_avatar_opacity != config.avatar_opacity
         || previous_avatar_preset != config.avatar_preset;
     let dock_visibility_changed = previous_hide_dock_icon != config.hide_dock_icon
@@ -4432,6 +4490,11 @@ pub(crate) fn persist_app_config(
             false,
         )
         .map_err(|e| AppError::Unknown(format!("同步桌宠窗口失败: {e}")))?;
+
+        // 窗口创建/显示后应用鼠标穿透设置
+        if config.avatar_enabled && config.avatar_click_through {
+            crate::avatar_engine::set_avatar_click_through(&app, true);
+        }
     }
 
     if config.avatar_enabled
@@ -4439,6 +4502,10 @@ pub(crate) fn persist_app_config(
         && !refresh_avatar_state_for_current_window(&app, state)
     {
         crate::avatar_engine::emit_avatar_state(&app, &avatar_state);
+    }
+
+    if avatar_click_through_changed && config.avatar_enabled {
+        crate::avatar_engine::set_avatar_click_through(&app, config.avatar_click_through);
     }
 
     if dock_visibility_changed {
@@ -8689,6 +8756,7 @@ mod tests {
                 }],
             }],
             work_time_duration: 100,
+            overtime_duration: 0,
             hourly_activity_distribution: vec![hourly(9, 60), hourly(10, 60)],
         };
         let day_two = DailyStats {
@@ -8779,6 +8847,7 @@ mod tests {
                 ],
             }],
             work_time_duration: 160,
+            overtime_duration: 0,
             hourly_activity_distribution: vec![hourly(9, 30), hourly(10, 90), hourly(11, 60)],
         };
 
@@ -8893,6 +8962,7 @@ mod tests {
                 ],
             }],
             work_time_duration: 0,
+            overtime_duration: 0,
             hourly_activity_distribution: vec![],
         };
 

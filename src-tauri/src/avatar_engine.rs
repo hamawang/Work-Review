@@ -431,6 +431,18 @@ pub fn sync_avatar_window(
     Ok(())
 }
 
+/// 设置桌宠窗口的鼠标穿透状态。
+/// 当 click_through=true 时，鼠标点击会穿透桌宠窗口到下层应用。
+pub fn set_avatar_click_through(app: &AppHandle, click_through: bool) {
+    if let Some(window) = app.get_webview_window(AVATAR_WINDOW_LABEL) {
+        if let Err(e) = window.set_ignore_cursor_events(click_through) {
+            log::warn!("设置桌宠鼠标穿透失败: {e}");
+        } else {
+            log::info!("桌宠鼠标穿透已{}", if click_through { "开启" } else { "关闭" });
+        }
+    }
+}
+
 pub fn apply_avatar_window_expansion(
     app: &AppHandle,
     scale: f64,

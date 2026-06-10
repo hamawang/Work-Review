@@ -73,7 +73,8 @@ pub fn is_browser_app(app_name: &str) -> bool {
         || app_lower.contains("liebao")
         || app_lower.contains("maxthon")
         || app_lower.contains("theworld")
-        || app_lower.contains("iexplore");
+        || app_lower.contains("iexplore")
+        || app_lower.contains("tabbit");
     if substring_match {
         return true;
     }

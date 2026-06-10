@@ -675,6 +675,9 @@ pub struct AppConfig {
     /// 日报提示词预设模板列表
     #[serde(default)]
     pub daily_report_prompt_presets: Vec<PromptPreset>,
+    /// 日报系统提示词覆盖（有值时替代硬编码的系统提示词）
+    #[serde(default)]
+    pub daily_report_system_prompt_override: Option<String>,
     /// 日报 Markdown 导出目录
     #[serde(default)]
     pub daily_report_export_dir: Option<String>,
@@ -786,6 +789,9 @@ pub struct AppConfig {
     /// 是否启用工作时间过滤。关闭后所有活动都算"工作时间"，不再区分
     #[serde(default = "default_true")]
     pub work_time_enabled: bool,
+    /// 每日标准工时（小时），用于计算加班时长。默认 8.0
+    #[serde(default = "default_standard_work_hours")]
+    pub standard_work_hours: f64,
 
     // 兼容旧版配置
     #[serde(default)]
@@ -825,6 +831,9 @@ pub struct AppConfig {
     /// 桌宠互动风格
     #[serde(default = "default_avatar_persona")]
     pub avatar_persona: String,
+    /// 桌宠鼠标穿透（点击事件穿透到下层窗口）
+    #[serde(default)]
+    pub avatar_click_through: bool,
     /// 通过桌宠手动记下的待跟进项
     #[serde(default)]
     pub avatar_followups: Vec<AvatarFollowupItem>,
@@ -866,6 +875,9 @@ fn default_break_reminder_interval_minutes() -> u64 {
 fn default_avatar_scale() -> f64 {
     0.9
 }
+fn default_standard_work_hours() -> f64 {
+    8.0
+}
 fn default_avatar_opacity() -> f64 {
     0.82
 }
@@ -896,6 +908,7 @@ impl Default for AppConfig {
             remote_storage: RemoteStorageConfig::default(),
             daily_report_custom_prompt: String::new(),
             daily_report_prompt_presets: Vec::new(),
+            daily_report_system_prompt_override: None,
             daily_report_export_dir: None,
             daily_report_auto_export: false,
             daily_report_auto_generate_time: None,
@@ -946,6 +959,7 @@ impl Default for AppConfig {
                 },
             ],
             work_time_enabled: true,
+            standard_work_hours: default_standard_work_hours(),
             // 旧版兼容字段
             ai_provider: AiProviderConfig::default(),
             ollama_host: "http://localhost:11434".to_string(),
@@ -961,6 +975,7 @@ impl Default for AppConfig {
             avatar_opacity: default_avatar_opacity(),
             avatar_preset: default_avatar_preset(),
             avatar_persona: default_avatar_persona(),
+            avatar_click_through: false,
             avatar_followups: Vec::new(),
             avatar_x: None,
             avatar_y: None,
@@ -995,6 +1010,7 @@ impl AppConfig {
         normalize_avatar_followups(&mut self.avatar_followups);
         self.break_reminder_interval_minutes =
             normalize_break_reminder_interval_minutes(self.break_reminder_interval_minutes);
+        self.standard_work_hours = self.standard_work_hours.clamp(1.0, 24.0);
         self.daily_report_custom_prompt = self.daily_report_custom_prompt.trim().to_string();
         normalize_prompt_presets(&mut self.daily_report_prompt_presets);
         self.daily_report_export_dir =

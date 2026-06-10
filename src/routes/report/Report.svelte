@@ -711,6 +711,31 @@
         class="control-input resize-y min-h-[80px]"
         placeholder={t('report.promptPlaceholder')}
       ></textarea>
+
+      <!-- 系统提示词覆盖 -->
+      <div class="mt-4 pt-3 border-t border-slate-200 dark:border-slate-700">
+        <div class="flex items-center justify-between mb-2">
+          <label class="text-sm font-medium text-slate-700 dark:text-slate-300">
+            {t('report.systemPromptOverride')}
+          </label>
+          <button
+            type="button"
+            class="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition"
+            on:click={() => { config.daily_report_system_prompt_override = null; }}
+            disabled={!config.daily_report_system_prompt_override}
+          >
+            {t('report.resetSystemPrompt')}
+          </button>
+        </div>
+        <p class="text-xs text-slate-400 dark:text-slate-500 mb-2">{t('report.systemPromptOverrideHint')}</p>
+        <textarea
+          rows="6"
+          class="control-input resize-y min-h-[100px] font-mono text-xs"
+          bind:value={config.daily_report_system_prompt_override}
+          on:change={persistReportPrompt}
+          placeholder={t('report.systemPromptOverridePlaceholder')}
+        ></textarea>
+      </div>
     </div>
   {/if}
 
