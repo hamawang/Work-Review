@@ -855,7 +855,7 @@ impl Database {
         }
     }
 
-    /// 合并活动：累加时长、追加OCR、更新截图路径
+    /// 合并活动：累加时长、追加OCR、更新截图路径、更新 browser_url
     pub fn merge_activity(
         &self,
         id: i64,
@@ -863,6 +863,7 @@ impl Database {
         new_ocr: Option<&str>,
         _new_screenshot_path: &str,
         new_timestamp: i64,
+        new_browser_url: Option<&str>,
     ) -> Result<()> {
         let conn = self.conn.lock().map_err(|e| {
             AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
@@ -888,14 +889,27 @@ impl Database {
             (None, None) => None,
         };
 
-        conn.execute(
-            "UPDATE activities 
-             SET duration = duration + ?1, 
-                 ocr_text = ?2, 
-                 timestamp = ?3
-             WHERE id = ?4",
-            params![duration_delta, merged_ocr, new_timestamp, id],
-        )?;
+        // 如果有新的 browser_url，一并更新（解决 SPA 页面导航后 URL 不刷新的问题）
+        if let Some(url) = new_browser_url.filter(|u| !u.is_empty()) {
+            conn.execute(
+                "UPDATE activities
+                 SET duration = duration + ?1,
+                     ocr_text = ?2,
+                     timestamp = ?3,
+                     browser_url = ?5
+                 WHERE id = ?4",
+                params![duration_delta, merged_ocr, new_timestamp, id, url],
+            )?;
+        } else {
+            conn.execute(
+                "UPDATE activities
+                 SET duration = duration + ?1,
+                     ocr_text = ?2,
+                     timestamp = ?3
+                 WHERE id = ?4",
+                params![duration_delta, merged_ocr, new_timestamp, id],
+            )?;
+        }
 
         Ok(())
     }

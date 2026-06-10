@@ -1059,6 +1059,7 @@ fn backfill_previous_activity_if_needed(
         None,
         &previous_activity.screenshot_path,
         current_timestamp,
+        None,
     );
     log::debug!(
         "⏱️ 时长回补: {} +{}s (切换到 {})",
@@ -2122,13 +2123,20 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                         && (current_timestamp - latest.timestamp) <= MERGE_GAP_SECS;
 
                     // 如果由于某种原因 browser_url 获取失败，但它确实是一个浏览器
-                    // 我们必须强制让 window_title 完全相同才能合并，否则不同标签页的切换会被死死合并成一条记录。
+                    // 我们必须更严格地判断合并条件，否则不同标签页的切换会被错误合并。
                     if merge
                         && active_window.browser_url.is_none()
                         && monitor::is_browser_app(&active_window.app_name)
-                        && latest.window_title != active_window.window_title
                     {
-                        merge = false;
+                        // 条件 1: 窗口标题不同 → 一定不是同一个标签页，不合并
+                        if latest.window_title != active_window.window_title {
+                            merge = false;
+                        }
+                        // 条件 2: 已有记录有 URL 但当前没有 → URL 采集失败，不合并
+                        // 防止把时长归到错误的 URL 上
+                        else if latest.browser_url.is_some() && active_window.browser_url.is_none() {
+                            merge = false;
+                        }
                     }
 
                     merge
@@ -2231,6 +2239,7 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                             None,
                             &previous_screenshot_path,
                             current_timestamp,
+                            active_window.browser_url.as_deref(),
                         ) {
                             Ok(_) => {
                                 persisted_duration += effective_duration;
@@ -2695,6 +2704,7 @@ async fn background_screenshot_task(state: Arc<Mutex<AppState>>, app: AppHandle)
                         None,
                         &act.screenshot_path,
                         current_ts,
+                        None,
                     ) {
                         Ok(_) => {
                             log::info!(
