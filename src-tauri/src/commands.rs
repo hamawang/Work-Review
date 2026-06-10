@@ -34,13 +34,13 @@ use tauri_plugin_updater::UpdaterExt;
 use work_review_core::categorize::is_merged_domain;
 
 const GITHUB_LATEST_RELEASE_API: &str =
-    "https://api.github.com/repos/wm94i/Work_Review/releases/latest";
-const GITHUB_LATEST_RELEASE_PAGE: &str = "https://github.com/wm94i/Work_Review/releases/latest";
+    "https://api.github.com/repos/wm94i/Work-Review/releases/latest";
+const GITHUB_LATEST_RELEASE_PAGE: &str = "https://github.com/wm94i/Work-Review/releases/latest";
 const UPDATE_STATUS_EVENT: &str = "update-status";
 const UPDATER_JSON_ENDPOINTS: &[&str] = &[
-    "https://github.com/wm94i/Work_Review/releases/latest/download/updater.json",
-    "https://ghproxy.cn/https://github.com/wm94i/Work_Review/releases/latest/download/updater-ghproxy.json",
-    "https://ghp.ci/https://github.com/wm94i/Work_Review/releases/latest/download/updater-ghp.json",
+    "https://github.com/wm94i/Work-Review/releases/latest/download/updater.json",
+    "https://ghproxy.cn/https://github.com/wm94i/Work-Review/releases/latest/download/updater-ghproxy.json",
+    "https://ghp.ci/https://github.com/wm94i/Work-Review/releases/latest/download/updater-ghp.json",
 ];
 const DEFAULT_UPDATE_CHECK_INTERVAL_HOURS: u64 = 24;
 const UPDATE_REQUEST_TIMEOUT_SECS: u64 = 35;
@@ -9111,16 +9111,16 @@ mod tests {
     #[test]
     fn 更新清单候选应优先显式版本地址再回退latest地址() {
         let candidates = build_updater_manifest_candidates(
-            "https://github.com/wm94i/Work_Review/releases/latest/download/updater.json",
+            "https://github.com/wm94i/Work-Review/releases/latest/download/updater.json",
             Some("1.0.24"),
         );
 
         assert_eq!(
             candidates,
             vec![
-                "https://github.com/wm94i/Work_Review/releases/download/v1.0.24/updater.json"
+                "https://github.com/wm94i/Work-Review/releases/download/v1.0.24/updater.json"
                     .to_string(),
-                "https://github.com/wm94i/Work_Review/releases/latest/download/updater.json"
+                "https://github.com/wm94i/Work-Review/releases/latest/download/updater.json"
                     .to_string(),
             ]
         );
@@ -9295,16 +9295,16 @@ mod tests {
     #[test]
     fn 更新清单候选应保留代理前缀并规范化版本号() {
         let candidates = build_updater_manifest_candidates(
-            "https://ghproxy.cn/https://github.com/wm94i/Work_Review/releases/latest/download/updater-ghproxy.json",
+            "https://ghproxy.cn/https://github.com/wm94i/Work-Review/releases/latest/download/updater-ghproxy.json",
             Some("v1.0.24"),
         );
 
         assert_eq!(
             candidates,
             vec![
-                "https://ghproxy.cn/https://github.com/wm94i/Work_Review/releases/download/v1.0.24/updater-ghproxy.json"
+                "https://ghproxy.cn/https://github.com/wm94i/Work-Review/releases/download/v1.0.24/updater-ghproxy.json"
                     .to_string(),
-                "https://ghproxy.cn/https://github.com/wm94i/Work_Review/releases/latest/download/updater-ghproxy.json"
+                "https://ghproxy.cn/https://github.com/wm94i/Work-Review/releases/latest/download/updater-ghproxy.json"
                     .to_string(),
             ]
         );
@@ -9314,7 +9314,7 @@ mod tests {
     fn 更新源应优先官方_github_并放宽超时() {
         assert_eq!(
             UPDATER_JSON_ENDPOINTS.first().copied(),
-            Some("https://github.com/wm94i/Work_Review/releases/latest/download/updater.json")
+            Some("https://github.com/wm94i/Work-Review/releases/latest/download/updater.json")
         );
         assert!(UPDATE_REQUEST_TIMEOUT_SECS >= 30);
         assert!(UPDATE_CONNECT_TIMEOUT_SECS >= 10);

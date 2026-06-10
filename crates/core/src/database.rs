@@ -2872,7 +2872,7 @@ mod tests {
         };
 
         let inserted_id = db.insert_activity(&activity).expect("插入测试数据失败");
-        db.merge_activity(inserted_id, 20, Some("new"), "shot-b.jpg", now)
+        db.merge_activity(inserted_id, 20, Some("new"), "shot-b.jpg", now, None)
             .expect("合并活动失败");
 
         let merged = db

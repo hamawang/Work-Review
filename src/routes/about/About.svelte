@@ -43,7 +43,7 @@
   }
 
   async function openGitHub() {
-    await open('https://github.com/wm94i/Work_Review');
+    await open('https://github.com/wm94i/Work-Review');
   }
 
   async function openDataDir() {

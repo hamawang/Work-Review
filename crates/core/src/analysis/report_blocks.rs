@@ -397,6 +397,7 @@ mod tests {
             domain_usage: vec![],
             browser_usage: vec![],
             work_time_duration: 0,
+            overtime_duration: 0,
             hourly_activity_distribution: vec![],
         };
         assert_eq!(

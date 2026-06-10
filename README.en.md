@@ -21,12 +21,12 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/wm94i/Work_Review/releases/latest">
-    <img src="https://img.shields.io/github/v/release/wm94i/Work_Review?style=flat-square&color=blue" alt="Release">
+  <a href="https://github.com/wm94i/Work-Review/releases/latest">
+    <img src="https://img.shields.io/github/v/release/wm94i/Work-Review?style=flat-square&color=blue" alt="Release">
   </a>
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue?style=flat-square" alt="Platform">
   <img src="https://img.shields.io/badge/%F0%9F%94%92%20all%20data%20local-green?style=flat-square" alt="All Data Local">
-  <img src="https://img.shields.io/github/license/wm94i/Work_Review?style=flat-square" alt="License">
+  <img src="https://img.shields.io/github/license/wm94i/Work-Review?style=flat-square" alt="License">
 </p>
 
 ---
@@ -125,7 +125,7 @@ Supported providers: Ollama (local) / OpenAI compatible / DeepSeek / Qwen / Zhip
 
 ## Quick Start
 
-1. Download the installer for your platform from [Releases](https://github.com/wm94i/Work_Review/releases/latest)
+1. Download the installer for your platform from [Releases](https://github.com/wm94i/Work-Review/releases/latest)
 2. On macOS, grant Screen Recording and Accessibility permissions
 3. Let it run in the background for a while
 4. Check the Overview / Timeline / Daily Report to see your recorded activity
@@ -261,10 +261,10 @@ MIT
 
 ## Star History
 
-<a href="https://www.star-history.com/#wm94i/Work_Review&Date">
+<a href="https://www.star-history.com/#wm94i/Work-Review&Date">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=wm94i/Work_Review&type=Date&theme=dark" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=wm94i/Work_Review&type=Date" />
-    <img alt="Star History" src="https://api.star-history.com/svg?repos=wm94i/Work_Review&type=Date" />
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=wm94i/Work-Review&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=wm94i/Work-Review&type=Date" />
+    <img alt="Star History" src="https://api.star-history.com/svg?repos=wm94i/Work-Review&type=Date" />
   </picture>
 </a>
