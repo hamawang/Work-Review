@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.49] - 2026-06-10
+
+### 新增
+- 工作助手 Agentic 架构（Stage 1-6）：五层结构 Tools → Model → Executor → Memory → Orchestrator，支持多轮工具调用、自动降级和路由分流
+- 5 个 Agent 工具：search_memory、analyze_intents、aggregate_stats、category_search、trend_comparison
+- 统一 Model 层：OpenAI 兼容 / Claude / Gemini 三种 provider 的多轮 tool-calling 格式转换
+- Agent 循环：最大 8 轮迭代 + 30 秒超时双重保护
+- Orchestrator 四路径路由：Direct / Fast / Agent / Fallback，Agent 失败自动降级
+- 加班时长统计：秒级精度，统计面板可见
+- 桌宠鼠标穿透选项：透明区穿透、本体可交互，可开关
+- 日报系统提示词可编辑：支持自定义 override + 一键还原默认
+- 浏览器识别扩展：内置 Tabbit 支持
+- 自动导出重试机制：导出失败与报告生成解耦，支持补导出
+
+### 修复
+- 浏览器 URL 合并准确性：SPA 页面导航后 URL 正确刷新；URL 采集失败时不再误合并不同标签页
+- 桌宠弹窗溢出：缩小最大宽度以适配紧凑窗口
+- 趋势对比分类排序：修正排序比较器的下标错误
+- 测试编译恢复：DailyStats 和 merge_activity 签名变更后测试调用同步更新
+- 仓库 URL 同步：所有链接从 Work_Review 更新为 Work-Review
+
+### 优化
+- 复杂意图关键词扩展（最多/最少/排名/占比/效率）
+- FastPath 改用 get_activities_in_range 替代纯 FTS 查询
+- 数据库连接改为 Arc<Mutex> 支持异步安全 Clone
+
 ## [1.0.48] - 2026-05-26
 
 ### 新增

@@ -624,7 +624,7 @@ fn trend_comparison_execute(ctx: &ToolContext, args: Value) -> Result<String, St
 
     // 按总时长排序（a+b 降序）
     all_keys.sort_by(|a, b| {
-        let sa = cats_a.get(a).copied().unwrap_or(0) + cats_b.get(b).copied().unwrap_or(0);
+        let sa = cats_a.get(a).copied().unwrap_or(0) + cats_b.get(a).copied().unwrap_or(0);
         let sb = cats_a.get(b).copied().unwrap_or(0) + cats_b.get(b).copied().unwrap_or(0);
         sb.cmp(&sa)
     });
