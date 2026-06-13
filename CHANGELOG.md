@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.50] - 2026-06-14
 
 ### 新增
 - 工作助手流式输出（阶段 1）：基于 Tauri `ipc::Channel` 统一事件流，回答过程实时展示工具调用步骤（"记忆检索 → 找到 N 条 → 统计聚合…"），并把命中记录作为"引用"折叠展示，让结论可追溯。命令仍返回完整 `AssistantAnswer`（双通道冗余，前端注释掉 `onEvent` 即 100% 回退到老路径）
