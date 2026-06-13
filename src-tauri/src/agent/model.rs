@@ -50,6 +50,9 @@ pub struct Message {
     pub tool_calls: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
+    /// 工具名称（仅 tool role 消息使用，Gemini 需要）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 impl Message {
@@ -59,6 +62,7 @@ impl Message {
             content: Some(content.into()),
             tool_calls: None,
             tool_call_id: None,
+            name: None,
         }
     }
 
@@ -68,6 +72,7 @@ impl Message {
             content: Some(content.into()),
             tool_calls: None,
             tool_call_id: None,
+            name: None,
         }
     }
 
@@ -90,15 +95,21 @@ impl Message {
             content: None,
             tool_calls: Some(Value::Array(tool_calls_json)),
             tool_call_id: None,
+            name: None,
         }
     }
 
     pub fn tool_result(tool_call_id: &str, content: &str) -> Self {
+        Self::tool_result_named(tool_call_id, content, None)
+    }
+
+    pub fn tool_result_named(tool_call_id: &str, content: &str, name: Option<&str>) -> Self {
         Self {
             role: "tool".into(),
             content: Some(content.into()),
             tool_calls: None,
             tool_call_id: Some(tool_call_id.into()),
+            name: name.map(|n| n.to_string()),
         }
     }
 }

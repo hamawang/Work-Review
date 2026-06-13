@@ -64,6 +64,7 @@ impl ConversationMemory {
                 content: msg.content.clone(),
                 tool_calls: None,      // 历史里不保留工具调用细节
                 tool_call_id: None,
+                name: None,
             });
         }
         memory
@@ -83,6 +84,7 @@ impl ConversationMemory {
             content: Some(truncated),
             tool_calls: None,
             tool_call_id: None,
+            name: None,
         });
 
         // 超过上限时自动压缩
@@ -159,6 +161,7 @@ impl ConversationMemory {
                 content: Some(summary.clone()),
                 tool_calls: None,
                 tool_call_id: None,
+                name: None,
             });
         }
 

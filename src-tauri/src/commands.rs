@@ -3670,12 +3670,14 @@ pub async fn chat_work_assistant(
     };
 
     // Stage 6: 完整 Orchestrator 集成
+    // 使用 locale 感知的系统提示词，确保繁体/英文用户得到对应语言的回答
+    let system_prompt = build_assistant_system_prompt(assistant_locale);
     let result = crate::agent::Orchestrator::handle(
         &trimmed_question,
         model_config.as_ref(),
         &database,
         &agent_history,
-        None,
+        Some(system_prompt),
     )
     .await?;
 

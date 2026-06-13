@@ -161,8 +161,12 @@ impl AgentExecutor {
                                 result_preview: result.chars().take(80).collect(),
                             });
 
-                            // ③ 追加工具结果到对话历史
-                            messages.push(Message::tool_result(&tc.id, &result));
+                            // ③ 追加工具结果到对话历史（携带工具名，Gemini 需要）
+                            messages.push(Message::tool_result_named(
+                                &tc.id,
+                                &result,
+                                Some(&tc.name),
+                            ));
                         }
                     }
                     // 继续循环 → LLM 下一轮能看到工具结果
