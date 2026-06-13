@@ -232,12 +232,34 @@ impl Analyzer for CloudAnalyzer {
             }
         }
 
+        let (content, used_ai, fallback_reason) = match self
+            .generate_final_report(date, stats, activities, &insights, &_category_name_overrides)
+            .await
+        {
+            Ok(content) => (content, true, None),
+            Err(e) => {
+                // Cloud 模式 AI 调用失败时回退到基础统计模板，与 Summary/Local 模式行为一致；
+                // 之前直接 `?` 会让整条日报生成命令整体失败，用户得不到任何报告（连统计区块都没有）。
+                log::warn!("Cloud 模式 AI 调用失败，回退到基础统计模板: {e}");
+                let reason = match self.locale {
+                    AppLocale::ZhCn => "请求失败，已回退到基础模板".to_string(),
+                    AppLocale::ZhTw => "請求失敗，已回退到基礎模板".to_string(),
+                    AppLocale::En => {
+                        "the AI request failed, so the report fell back to the base template"
+                            .to_string()
+                    }
+                };
+                let mut base =
+                    generate_stats_summary_for_locale(stats, self.locale, &_category_name_overrides);
+                base.push_str(&format!("\n\n---\n*{reason}"));
+                (base, false, Some(reason))
+            }
+        };
+
         Ok(GeneratedReport {
-            content: self
-                .generate_final_report(date, stats, activities, &insights, &_category_name_overrides)
-                .await?,
-            used_ai: true,
-            fallback_reason: None,
+            content,
+            used_ai,
+            fallback_reason,
         })
     }
 }

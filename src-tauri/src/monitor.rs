@@ -72,15 +72,28 @@ fn run_monitor_command_with_timeout(command: &mut Command, context: &str) -> Res
     let mut child = command
         .spawn()
         .map_err(|e| AppError::Unknown(format!("{context} 启动失败: {e}")))?;
-    let started_at = Instant::now();
 
-    loop {
+    // 起线程持续排空 stdout/stderr 管道，避免子进程因管道缓冲写满阻塞、try_wait
+    // 一直返回 None 直到超时（osascript/PowerShell 输出大时必现）。
+    let stdout_handle = child.stdout.take().map(|mut s| {
+        thread::spawn(move || {
+            let mut buf = Vec::new();
+            let _ = std::io::Read::read_to_end(&mut s, &mut buf);
+            buf
+        })
+    });
+    let stderr_handle = child.stderr.take().map(|mut s| {
+        thread::spawn(move || {
+            let mut buf = Vec::new();
+            let _ = std::io::Read::read_to_end(&mut s, &mut buf);
+            buf
+        })
+    });
+
+    let started_at = Instant::now();
+    let status = loop {
         match child.try_wait() {
-            Ok(Some(_)) => {
-                return child
-                    .wait_with_output()
-                    .map_err(|e| AppError::Unknown(format!("{context} 读取输出失败: {e}")));
-            }
+            Ok(Some(status)) => break status,
             Ok(None) if started_at.elapsed() < MONITOR_COMMAND_TIMEOUT => {
                 thread::sleep(Duration::from_millis(50));
             }
@@ -98,7 +111,11 @@ fn run_monitor_command_with_timeout(command: &mut Command, context: &str) -> Res
                 return Err(AppError::Unknown(format!("{context} 等待进程失败: {e}")));
             }
         }
-    }
+    };
+
+    let stdout = stdout_handle.and_then(|h| h.join().ok()).unwrap_or_default();
+    let stderr = stderr_handle.and_then(|h| h.join().ok()).unwrap_or_default();
+    Ok(Output { status, stdout, stderr })
 }
 
 /// 活动窗口信息
@@ -2894,9 +2911,7 @@ fn normalize_macos_frontmost_app_name(
     {
         let normalized = normalize_display_app_name(&candidate);
         log::debug!(
-            "macOS 前台应用识别: {process_name} -> {normalized} (bundle={:?}, path={:?})",
-            bundle_identifier,
-            app_path
+            "macOS 前台应用识别: {process_name} -> {normalized} (bundle={bundle_identifier:?}, path={app_path:?})"
         );
         return normalized;
     }
@@ -2909,9 +2924,7 @@ fn normalize_macos_frontmost_app_name(
 #[cfg(target_os = "macos")]
 fn build_running_guarded_browser_script_macos(app_name: &str, inner: &str) -> String {
     format!(
-        "if application \"{app_name}\" is running then\n    tell application \"{app_name}\"\n{inner}\n    end tell\nelse\n    return \"\"\nend if",
-        app_name = app_name,
-        inner = inner
+        "if application \"{app_name}\" is running then\n    tell application \"{app_name}\"\n{inner}\n    end tell\nelse\n    return \"\"\nend if"
     )
 }
 
@@ -3228,8 +3241,7 @@ on collect_url_candidates(rootElem)
             return output
         end tell
     end using terms from
-end collect_url_candidates"#,
-        process_name = process_name
+end collect_url_candidates"#
     )
 }
 
@@ -4274,7 +4286,7 @@ pub fn get_overlay_windows(frontmost_app: &str) -> Vec<ActiveWindow> {
 
             // 排除已知悬浮工具栏应用的浮动窗口
             if TOOLBAR_APPS.iter().any(|&app| owner_name.contains(app)) {
-                log::debug!("🪟 排除工具栏浮动窗口: {} (layer={})", owner_name, layer);
+                log::debug!("🪟 排除工具栏浮动窗口: {owner_name} (layer={layer})");
                 continue;
             }
 
@@ -4554,6 +4566,7 @@ pub fn categorize_app(app_name: &str, window_title: &str) -> String {
         || app_lower.contains("qq浏览器")
         || app_lower.contains("360浏览器")
         || app_lower.contains("搜狗浏览器")
+        || app_lower.contains("tabbit")
     {
         return "browser".to_string();
     }

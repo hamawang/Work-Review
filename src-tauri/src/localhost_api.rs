@@ -13,6 +13,7 @@ use std::time::Duration;
 use tauri::AppHandle;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use subtle::ConstantTimeEq;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
@@ -29,6 +30,7 @@ const LOCALHOST_API_TOKEN_FILE: &str = "localhost_api_token.txt";
 const MAX_REQUEST_BYTES: usize = 256 * 1024;
 const MAX_BODY_BYTES: usize = 128 * 1024;
 
+#[derive(Default)]
 pub struct LocalhostApiRuntime {
     pub running: bool,
     pub bound_host: Option<String>,
@@ -37,17 +39,6 @@ pub struct LocalhostApiRuntime {
     pub shutdown_tx: Option<oneshot::Sender<()>>,
 }
 
-impl Default for LocalhostApiRuntime {
-    fn default() -> Self {
-        Self {
-            running: false,
-            bound_host: None,
-            bound_port: None,
-            last_error: None,
-            shutdown_tx: None,
-        }
-    }
-}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -953,7 +944,12 @@ fn authorize_request(request: &ParsedRequest, state: &Arc<Mutex<AppState>>) -> R
 
     let provided = from_header.or(from_query);
 
-    if provided == Some(expected_token.as_str()) {
+    // 常量时间比较，与飞书/钉钉/企微的签名校验保持一致的安全基线，
+    // 避免理论上对本地 token 的时序侧信道。
+    let matched = provided
+        .map(|p| bool::from(p.as_bytes().ct_eq(expected_token.as_bytes())))
+        .unwrap_or(false);
+    if matched {
         Ok(())
     } else {
         Err(AppError::Config("缺少或无效的本地 API token".to_string()))

@@ -5,13 +5,16 @@
 //! 对应 Python: 03_agent_loop.py 里的 agent_run() 函数
 //! 架构位置：在 Tools (Stage 1) 和 Model (Stage 2) 之上
 
-use super::model::{self, LlmResponse, Message, StopReason, ToolCall};
+use super::events::{default_tool_label, StreamEvent};
+use super::model::{self, Message, StopReason};
 use super::tools::ToolRegistry;
 use crate::config::ModelConfig;
 use crate::database::Database;
 use crate::error::AppError;
-use serde_json::Value;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
+use tokio::sync::mpsc;
+use work_review_core::database::MemorySearchItem;
 
 // ══════════════════════════════════════════════════════════
 // Agent 执行结果
@@ -22,35 +25,10 @@ use std::time::Instant;
 pub struct AgentResult {
     /// 最终回答
     pub answer: String,
-    /// 使用了几轮
-    pub iterations: usize,
-    /// 执行过程追踪（用于调试和前端展示）
-    pub trace: Vec<TraceStep>,
-    /// 是否使用了 AI
-    pub used_ai: bool,
     /// 工具调用记录
     pub tool_labels: Vec<String>,
-}
-
-/// 执行追踪的每一步
-#[derive(Debug, Clone)]
-pub enum TraceStep {
-    /// LLM 给出最终回答
-    FinalAnswer { round: usize, content: String },
-    /// LLM 调用了工具
-    ToolCall {
-        round: usize,
-        tool_name: String,
-        arguments: Value,
-    },
-    /// 工具执行结果
-    ToolResult {
-        round: usize,
-        tool_name: String,
-        result_preview: String,
-    },
-    /// 达到最大迭代次数
-    MaxIterationsReached { max: usize },
+    /// 工具执行收集的引用记录（供前端展示"依据"）
+    pub references: Vec<MemorySearchItem>,
 }
 
 // ══════════════════════════════════════════════════════════
@@ -82,6 +60,9 @@ impl AgentExecutor {
     ///     if response 是工具调用 → 执行工具，结果追加到 messages，继续
     /// 超过 max_iterations → 强制结束
     /// ```
+    ///
+    /// `event_tx` 用于流式推送步骤进度（StepStart/StepResult）与终态（Done）。
+    /// 为 None 时退化为静默执行（单测 / 非流式调用方）。
     pub async fn run(
         question: &str,
         model_config: &ModelConfig,
@@ -89,6 +70,9 @@ impl AgentExecutor {
         system_prompt: Option<&str>,
         history: &[Message],
         max_iterations: Option<usize>,
+        ignored_apps: Vec<String>,
+        excluded_domains: Vec<String>,
+        event_tx: Option<mpsc::Sender<StreamEvent>>,
     ) -> Result<AgentResult, AppError> {
         let sys = system_prompt.unwrap_or(DEFAULT_SYSTEM_PROMPT);
         let max_iter = max_iterations.unwrap_or(DEFAULT_MAX_ITERATIONS);
@@ -96,17 +80,21 @@ impl AgentExecutor {
         // 工具注册中心（Stage 1）
         let registry = ToolRegistry::new();
         let tools = registry.to_openai_tools();
-        let tool_context = super::tools::ToolContext { database };
+        let tool_context = super::tools::ToolContext {
+            database,
+            ignored_apps,
+            excluded_domains,
+            collected_references: Arc::new(Mutex::new(Vec::new())),
+        };
 
         // 构造初始消息：历史 + 当前问题
         let mut messages: Vec<Message> = history.to_vec();
         messages.push(Message::user(question));
 
-        let mut trace = Vec::new();
         let mut tool_labels = Vec::new();
         let start = Instant::now();
 
-        for i in 0..max_iter {
+        for _ in 0..max_iter {
             // ── 第 1 步：调用 LLM（Stage 2） ──
             let response = model::chat_with_tools(model_config, sys, &messages, &tools)
                 .await
@@ -117,21 +105,36 @@ impl AgentExecutor {
                 StopReason::Stop => {
                     // LLM 给出最终回答 → 循环结束
                     let content = response.content.unwrap_or_default();
-                    trace.push(TraceStep::FinalAnswer {
-                        round: i + 1,
-                        content: content.chars().take(100).collect(),
-                    });
-
+                    let references = tool_context.take_all_references();
+                    emit_done(&event_tx, &content, &references, &tool_labels);
                     return Ok(AgentResult {
                         answer: content,
-                        iterations: i + 1,
-                        trace,
-                        used_ai: true,
                         tool_labels,
+                        references,
                     });
                 }
 
                 StopReason::ToolCall => {
+                    // provider 声明要调用工具却未给出实际 tool_calls（某些 OpenAI 兼容中转
+                    // 网关在边缘情况下会如此）→ 直接终止，避免 messages 不变导致循环空转、
+                    // 白白消耗最多 8 轮 API 配额与 30s 用户等待。
+                    let calls_missing = response
+                        .tool_calls
+                        .as_ref()
+                        .is_none_or(|calls| calls.is_empty());
+                    if calls_missing {
+                        let content = response.content.clone().unwrap_or_else(|| {
+                            "模型未返回可执行的工具调用，请稍后重试。".to_string()
+                        });
+                        let references = tool_context.take_all_references();
+                        emit_done(&event_tx, &content, &references, &tool_labels);
+                        return Ok(AgentResult {
+                            answer: content,
+                            tool_labels,
+                            references,
+                        });
+                    }
+
                     // LLM 想调工具 → 执行
                     if let Some(calls) = &response.tool_calls {
                         // ① 记录 assistant 的工具调用
@@ -139,27 +142,38 @@ impl AgentExecutor {
 
                         // ② 逐个执行工具
                         for tc in calls {
-                            trace.push(TraceStep::ToolCall {
-                                round: i + 1,
-                                tool_name: tc.name.clone(),
-                                arguments: tc.arguments.clone(),
-                            });
-
                             if !tool_labels.contains(&tc.name) {
                                 tool_labels.push(tc.name.clone());
                             }
 
-                            // 执行工具（Stage 1）
-                            let result = match registry.execute(&tc.name, tc.arguments.clone(), &tool_context) {
-                                Ok(r) => r,
-                                Err(e) => format!("工具执行失败: {e}"),
-                            };
+                            // 步骤开始：推送 StepStart，并记录引用基线以取本轮增量
+                            emit_event(
+                                &event_tx,
+                                StreamEvent::StepStart {
+                                    tool: tc.name.clone(),
+                                    label: default_tool_label(&tc.name).to_string(),
+                                },
+                            );
+                            let ref_base = tool_context.references_len();
 
-                            trace.push(TraceStep::ToolResult {
-                                round: i + 1,
-                                tool_name: tc.name.clone(),
-                                result_preview: result.chars().take(80).collect(),
-                            });
+                            // 执行工具（Stage 1）
+                            let result =
+                                match registry.execute(&tc.name, tc.arguments.clone(), &tool_context)
+                                {
+                                    Ok(r) => r,
+                                    Err(e) => format!("工具执行失败: {e}"),
+                                };
+
+                            // 步骤结束：推送 StepResult（携带本轮新增引用）
+                            let new_refs = tool_context.drain_from(ref_base);
+                            emit_event(
+                                &event_tx,
+                                StreamEvent::StepResult {
+                                    tool: tc.name.clone(),
+                                    hits: new_refs.len(),
+                                    references: new_refs,
+                                },
+                            );
 
                             // ③ 追加工具结果到对话历史（携带工具名，Gemini 需要）
                             messages.push(Message::tool_result_named(
@@ -174,44 +188,65 @@ impl AgentExecutor {
 
                 StopReason::MaxTokens => {
                     // Token 用完了，用已有内容回答
-                    let content = response.content.unwrap_or_else(|| "回答被截断，请尝试缩短问题。".to_string());
-                    trace.push(TraceStep::FinalAnswer {
-                        round: i + 1,
-                        content: content.chars().take(100).collect(),
-                    });
+                    let content =
+                        response.content.unwrap_or_else(|| "回答被截断，请尝试缩短问题。".to_string());
+                    let references = tool_context.take_all_references();
+                    emit_done(&event_tx, &content, &references, &tool_labels);
                     return Ok(AgentResult {
                         answer: content,
-                        iterations: i + 1,
-                        trace,
-                        used_ai: true,
                         tool_labels,
+                        references,
                     });
                 }
             }
 
             // 安全检查：如果循环超过 30 秒，强制结束
             if start.elapsed().as_secs() > 30 {
-                trace.push(TraceStep::MaxIterationsReached { max: max_iter });
+                let content = "处理超时，请尝试更具体的问题。".to_string();
+                let references = tool_context.take_all_references();
+                emit_done(&event_tx, &content, &references, &tool_labels);
                 return Ok(AgentResult {
-                    answer: "处理超时，请尝试更具体的问题。".to_string(),
-                    iterations: i + 1,
-                    trace,
-                    used_ai: true,
+                    answer: content,
                     tool_labels,
+                    references,
                 });
             }
         }
 
         // ── 超过最大迭代次数 ──
-        trace.push(TraceStep::MaxIterationsReached { max: max_iter });
+        let content = "抱歉，处理这个问题需要过多步骤。请尝试更具体地描述。".to_string();
+        let references = tool_context.take_all_references();
+        emit_done(&event_tx, &content, &references, &tool_labels);
         Ok(AgentResult {
-            answer: "抱歉，处理这个问题需要过多步骤。请尝试更具体地描述。".to_string(),
-            iterations: max_iter,
-            trace,
-            used_ai: true,
+            answer: content,
             tool_labels,
+            references,
         })
     }
+}
+
+/// 推送一个流式事件；channel 满/关闭都不影响主流程。
+fn emit_event(tx: &Option<mpsc::Sender<StreamEvent>>, evt: StreamEvent) {
+    if let Some(tx) = tx {
+        let _ = tx.try_send(evt);
+    }
+}
+
+/// 推送终态 Done 事件（携带完整答案、引用、工具标签）。
+fn emit_done(
+    tx: &Option<mpsc::Sender<StreamEvent>>,
+    answer: &str,
+    references: &[MemorySearchItem],
+    tool_labels: &[String],
+) {
+    emit_event(
+        tx,
+        StreamEvent::Done {
+            answer: answer.to_string(),
+            references: references.to_vec(),
+            tool_labels: tool_labels.to_vec(),
+        },
+    );
 }
 
 // ══════════════════════════════════════════════════════════
@@ -221,64 +256,7 @@ impl AgentExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_trace_step_final_answer_format() {
-        let step = TraceStep::FinalAnswer {
-            round: 1,
-            content: "今天你主要在编码".to_string(),
-        };
-        if let TraceStep::FinalAnswer { round, content } = step {
-            assert_eq!(round, 1);
-            assert_eq!(content, "今天你主要在编码");
-        }
-    }
-
-    #[test]
-    fn test_trace_step_tool_call_format() {
-        let step = TraceStep::ToolCall {
-            round: 2,
-            tool_name: "search_memory".to_string(),
-            arguments: serde_json::json!({"query": "debug"}),
-        };
-        if let TraceStep::ToolCall {
-            round,
-            tool_name,
-            arguments,
-        } = step
-        {
-            assert_eq!(round, 2);
-            assert_eq!(tool_name, "search_memory");
-            assert_eq!(arguments["query"], "debug");
-        }
-    }
-
-    #[test]
-    fn test_agent_result_trace_ordering() {
-        // 模拟一次完整的 trace：调工具 → 拿结果 → 最终回答
-        let trace = vec![
-            TraceStep::ToolCall {
-                round: 1,
-                tool_name: "analyze_intents".to_string(),
-                arguments: serde_json::json!({"date_from": "2026-06-01", "date_to": "2026-06-09"}),
-            },
-            TraceStep::ToolResult {
-                round: 1,
-                tool_name: "analyze_intents".to_string(),
-                result_preview: "编码 8h (73%)...".to_string(),
-            },
-            TraceStep::FinalAnswer {
-                round: 2,
-                content: "本周你主要在编码...".to_string(),
-            },
-        ];
-
-        // 验证 trace 的顺序正确
-        assert_eq!(trace.len(), 3);
-        assert!(matches!(&trace[0], TraceStep::ToolCall { round: 1, .. }));
-        assert!(matches!(&trace[1], TraceStep::ToolResult { round: 1, .. }));
-        assert!(matches!(&trace[2], TraceStep::FinalAnswer { round: 2, .. }));
-    }
+    use super::super::model::ToolCall;
 
     #[test]
     fn test_max_iterations_default() {

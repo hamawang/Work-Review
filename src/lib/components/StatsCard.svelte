@@ -5,6 +5,7 @@
   export let color = 'indigo';
   export let href = null;
   export let embedded = false;
+  export let subtitle = null;
 
   const iconColors = {
     indigo: 'text-indigo-500 dark:text-indigo-400',
@@ -47,6 +48,9 @@
       <div class="min-w-0 flex-1">
         <span class="text-[13px] font-medium text-slate-400 dark:text-slate-500 leading-none">{title}</span>
         <p class={valueClass}>{value}</p>
+        {#if subtitle}
+          <p class="mt-1.5 text-xs font-medium leading-none text-slate-400 dark:text-slate-500">{subtitle}</p>
+        {/if}
       </div>
       <div class={iconClass}>
         {#if icon === 'duration'}
@@ -70,8 +74,6 @@
             <rect x="4" y="13" width="7" height="7" rx="2" stroke-width="1.8" />
             <rect x="13" y="13" width="7" height="7" rx="2" stroke-width="1.8" />
           </svg>
-        {:else}
-          {icon}
         {/if}
       </div>
     </div>
@@ -82,6 +84,9 @@
       <div class="min-w-0 flex-1">
         <span class="text-[13px] font-medium text-slate-400 dark:text-slate-500 leading-none">{title}</span>
         <p class={valueClass}>{value}</p>
+        {#if subtitle}
+          <p class="mt-1.5 text-xs font-medium leading-none text-slate-400 dark:text-slate-500">{subtitle}</p>
+        {/if}
       </div>
       <div class={iconClass}>
         {#if icon === 'duration'}
@@ -105,8 +110,6 @@
             <rect x="4" y="13" width="7" height="7" rx="2" stroke-width="1.8" />
             <rect x="13" y="13" width="7" height="7" rx="2" stroke-width="1.8" />
           </svg>
-        {:else}
-          {icon}
         {/if}
       </div>
     </div>

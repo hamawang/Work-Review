@@ -19,7 +19,7 @@
       ? 'background: rgba(236, 253, 245, 0.98);'
       : 'background: rgba(255, 255, 255, 0.94);';
   $: compactBubbleMessage = !bubbleMessage?.includes('\n') && (bubbleMessage?.trim().length ?? 0) <= 14;
-  // 约束弹框宽度不超出桌宠窗口：88vw 在 276px 窗口内 ≈ 243px，留出边距
+  // 约束弹框宽度不超出桌宠窗口：82vw 在 276px 窗口内 ≈ 226px，留出边距
   $: bubblePanelStyle = compactBubbleMessage
     ? 'width: fit-content; min-width: 120px; max-width: min(82vw, 196px);'
     : 'width: min(82vw, 336px); min-width: 160px; max-width: min(82vw, 336px);';

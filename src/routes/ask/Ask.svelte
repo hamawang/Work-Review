@@ -1,6 +1,6 @@
 <script>
   import { onDestroy, onMount, tick } from 'svelte';
-  import { invoke } from '@tauri-apps/api/core';
+  import { invoke, Channel } from '@tauri-apps/api/core';
   import { marked } from 'marked';
   import { assistantStore, BASIC_ASSISTANT_MODEL_ID } from '../../lib/stores/assistant.js';
   import { formatDurationLocalized, locale, t, tm } from '$lib/i18n/index.js';
@@ -346,31 +346,54 @@
       content: trimmed,
     });
 
+    // 发送即插入占位 assistant message，流式事件会逐步更新它（步骤/引用/答案）
+    assistantStore.appendMessage({
+      role: 'assistant',
+      content: '',
+      streaming: true,
+      steps: [],
+      references: [],
+      toolLabels: [],
+      usedAi: false,
+    });
+
     input = '';
     resizeComposer();
     await tick();
     await scrollToBottom('auto', 2);
 
+    let streamSettled = false;
     try {
+      const channel = new Channel();
+      channel.onmessage = (event) => {
+        if (handleStreamEvent(event)) streamSettled = true;
+      };
       const answer = await withTimeout(
         invoke('chat_work_assistant', {
           question: trimmed,
           history,
           modelConfig: getSelectedModelConfig(),
           locale: currentLocale,
+          onEvent: channel,
         }),
         ASK_TIMEOUT_MS
       );
 
-      // 写入全局 store（即使组件已销毁也安全）
-      assistantStore.appendMessage({
-        role: 'assistant',
-        content: answer.answer,
-        usedAi: answer.usedAi,
-        modelName: answer.modelName,
-        toolLabels: answer.toolLabels || [],
-        references: answer.references || [],
-      });
+      // 事件优先：已收到 done/error 则用事件结果；否则用 await 返回值兜底
+      if (!streamSettled) {
+        assistantStore.updateLastStreaming((m) => ({
+          ...m,
+          content: answer.answer || m.content,
+          references: answer.references || m.references,
+          toolLabels: answer.toolLabels || m.toolLabels,
+          usedAi: answer.usedAi,
+          modelName: answer.modelName,
+          streaming: false,
+        }));
+      } else {
+        // 流式已收尾，补 modelName（事件未携带）
+        assistantStore.updateLastStreaming((m) => ({ ...m, modelName: answer.modelName }));
+      }
       if (!destroyed) {
         await scrollToBottom();
       }
@@ -378,6 +401,7 @@
       if (!destroyed) {
         error = e.toString();
       }
+      assistantStore.updateLastStreaming((m) => ({ ...m, streaming: false }));
     } finally {
       assistantStore.setSending(false);
       if (destroyed) return;
@@ -385,6 +409,68 @@
       resizeComposer();
       composer?.focus();
     }
+  }
+
+  // 处理后端流式事件，返回 true 表示终态（done/error）。
+  function handleStreamEvent(event) {
+    if (!event || typeof event !== 'object') return false;
+    switch (event.type) {
+      case 'stepStart':
+        assistantStore.updateLastStreaming((m) => ({
+          ...m,
+          steps: [...m.steps, { tool: event.tool, label: event.label, status: 'running' }],
+        }));
+        if (!destroyed) scrollToBottom();
+        return false;
+      case 'stepResult':
+        assistantStore.updateLastStreaming((m) => ({
+          ...m,
+          steps: m.steps.map((s, i) =>
+            i === m.steps.length - 1 ? { ...s, status: 'done', hits: event.hits } : s
+          ),
+          references: event.references?.length
+            ? mergeReferences(m.references, event.references)
+            : m.references,
+        }));
+        return false;
+      case 'token':
+        assistantStore.updateLastStreaming((m) => ({ ...m, content: m.content + event.token }));
+        if (!destroyed) scrollToBottom();
+        return false;
+      case 'done':
+        assistantStore.updateLastStreaming((m) => ({
+          ...m,
+          content: event.answer ?? m.content,
+          references: event.references?.length ? event.references : m.references,
+          toolLabels: event.toolLabels?.length ? event.toolLabels : m.toolLabels,
+          streaming: false,
+        }));
+        return true;
+      case 'error':
+        assistantStore.updateLastStreaming((m) => ({
+          ...m,
+          content: event.error || m.content || t('ask.requestFailed'),
+          streaming: false,
+        }));
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  function mergeReferences(existing, incoming) {
+    const seen = new Set(
+      (existing || []).map((r) => `${r.sourceId ?? ''}|${r.timestamp}|${r.title}`)
+    );
+    const merged = [...(existing || [])];
+    for (const r of incoming || []) {
+      const key = `${r.sourceId ?? ''}|${r.timestamp}|${r.title}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        merged.push(r);
+      }
+    }
+    return merged;
   }
 
   function handleComposerKeydown(event) {
@@ -428,8 +514,27 @@
                   : 'ask-message-card ask-message-card-assistant min-w-0 w-full max-w-[90%] px-1 py-1 text-slate-800 dark:text-slate-100'}
               >
                 {#if message.role === 'assistant'}
+                  {#if message.steps?.length}
+                    <div class="mb-3 flex flex-col gap-1.5">
+                      {#each message.steps as step}
+                        <div class="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                          {#if step.status === 'running'}
+                            <span class="inline-block h-3 w-3 animate-spin rounded-full border-2 border-slate-300 border-t-transparent dark:border-slate-600"></span>
+                          {:else}
+                            <span class="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400"></span>
+                          {/if}
+                          <span>{step.label}</span>
+                          {#if step.status === 'done' && step.hits != null}<span class="text-slate-400 dark:text-slate-500">· {step.hits} {t('ask.hits')}</span>{/if}
+                        </div>
+                      {/each}
+                    </div>
+                  {/if}
                   <div class="markdown-body assistant-markdown min-w-0 max-w-none">
-                    {@html renderMarkdown(message.content)}
+                    {#if message.streaming}
+                      <p class="whitespace-pre-wrap break-words leading-7">{message.content}{#if !message.content}{t('ask.thinking')}{/if}<span class="ml-0.5 inline-block animate-pulse text-slate-400">▍</span></p>
+                    {:else}
+                      {@html renderMarkdown(message.content)}
+                    {/if}
                   </div>
 
                   {#if message.references?.length}

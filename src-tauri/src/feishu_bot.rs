@@ -66,13 +66,12 @@ async fn get_tenant_token(client: &Client, app_id: &str, app_secret: &str) -> Op
 
 async fn reply_message(client: &Client, token: &str, message_id: &str, text: &str) -> Option<()> {
     let url = format!(
-        "https://open.feishu.cn/open-apis/im/v1/messages/{}/reply",
-        message_id
+        "https://open.feishu.cn/open-apis/im/v1/messages/{message_id}/reply"
     );
     let content = serde_json::json!({"text": text}).to_string();
     client
         .post(&url)
-        .header("Authorization", format!("Bearer {}", token))
+        .header("Authorization", format!("Bearer {token}"))
         .json(&serde_json::json!({"content_type": "text", "content": content}))
         .timeout(Duration::from_secs(10))
         .send()

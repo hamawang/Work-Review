@@ -113,6 +113,7 @@ pub fn find_followup_suggestion(
     persona: &str,
     manual_followups: &[AvatarFollowupItem],
     now_ts: i64,
+    now_ms: u64,
 ) -> Option<AvatarFollowupSuggestionPayload> {
     let current_context = CurrentContext::from_active_window(active_window)?;
     let sessions = build_work_sessions(activities);
@@ -128,6 +129,12 @@ pub fn find_followup_suggestion(
         let project_key = session_project_key(&session);
         let score = score_session_against_context(&session, &current_context);
         if score < threshold {
+            continue;
+        }
+
+        // 跳过冷却中的项目（被 snooze 或同项目刚提醒过），避免"高分但冷却中"的项
+        // 占据唯一推荐位、遮蔽掉次高分但仍可提醒的项目。
+        if !should_emit_followup(&project_key, now_ms) {
             continue;
         }
 
@@ -515,7 +522,7 @@ mod tests {
         };
 
         let suggestion =
-            find_followup_suggestion(&activities, &active_window, "assistant", &[], 1_710_020_000)
+            find_followup_suggestion(&activities, &active_window, "assistant", &[], 1_710_020_000, 0)
                 .expect("should match");
 
         let expected_date = chrono::Local
@@ -563,7 +570,8 @@ mod tests {
             &active_window,
             "assistant",
             &followups,
-            1_710_020_000
+            1_710_020_000,
+            0
         )
         .is_none());
     }

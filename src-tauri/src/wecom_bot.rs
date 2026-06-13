@@ -49,7 +49,7 @@ impl WecomResponse {
 
 /// Decode WeCom EncodingAESKey (43 chars) to 32-byte AES key
 fn decode_aes_key(encoding_aes_key: &str) -> Option<[u8; 32]> {
-    let padded = format!("{}=", encoding_aes_key);
+    let padded = format!("{encoding_aes_key}=");
     let decoded = BASE64.decode(&padded).ok()?;
     if decoded.len() != 32 {
         return None;
@@ -61,7 +61,7 @@ fn decode_aes_key(encoding_aes_key: &str) -> Option<[u8; 32]> {
 
 /// Verify WeCom callback signature: SHA1(sort([token, timestamp, nonce, encrypt]))
 fn verify_signature(token: &str, timestamp: &str, nonce: &str, encrypt: &str, signature: &str) -> bool {
-    let mut parts = vec![token.to_string(), timestamp.to_string(), nonce.to_string(), encrypt.to_string()];
+    let mut parts = [token.to_string(), timestamp.to_string(), nonce.to_string(), encrypt.to_string()];
     parts.sort();
     let joined = parts.join("");
     use sha1::{Digest, Sha1};
@@ -344,7 +344,7 @@ fn encrypt_reply(
     };
 
     let signature = {
-        let mut parts = vec![token.to_string(), ts.clone(), new_nonce.clone(), encrypted.clone()];
+        let mut parts = [token.to_string(), ts.clone(), new_nonce.clone(), encrypted.clone()];
         parts.sort();
         let joined = parts.join("");
         use sha1::{Digest, Sha1};

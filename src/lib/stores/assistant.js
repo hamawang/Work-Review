@@ -9,12 +9,20 @@ const DEFAULT_STATE = {
   sending: false,
 };
 
+function genId() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+  return `m-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 function normalizeMessage(message) {
   return {
     ...message,
+    id: message?.id || genId(),
     cards: Array.isArray(message?.cards) ? message.cards : [],
     references: Array.isArray(message?.references) ? message.references : [],
     toolLabels: Array.isArray(message?.toolLabels) ? message.toolLabels : [],
+    steps: Array.isArray(message?.steps) ? message.steps : [],
+    streaming: Boolean(message?.streaming),
   };
 }
 
@@ -98,6 +106,15 @@ function createAssistantStore() {
       })),
     setSending: (sending) =>
       update((state) => ({ ...state, sending })),
+    // 增量更新当前 streaming 的 assistant message（流式事件驱动）。
+    updateLastStreaming: (updater) =>
+      update((state) => {
+        const idx = state.messages.findIndex((m) => m.streaming);
+        if (idx === -1) return state;
+        const newMessages = state.messages.slice();
+        newMessages[idx] = normalizeMessage(updater({ ...newMessages[idx] }));
+        return { ...state, messages: newMessages };
+      }),
     reset: () => set(DEFAULT_STATE),
   };
 }

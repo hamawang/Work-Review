@@ -9,7 +9,9 @@ use crate::database::Database;
 use crate::work_intelligence;
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use work_review_core::categorize::{categorize_app, get_category_name, normalize_display_app_name};
+use work_review_core::database::MemorySearchItem;
 
 // ══════════════════════════════════════════════════════════
 // 共享 Helper 函数
@@ -96,6 +98,73 @@ pub struct ToolDefinition {
 /// 所以把执行工具需要的所有东西打包进 ToolContext。
 pub struct ToolContext<'a> {
     pub database: &'a Database,
+    /// 隐私过滤：被用户标记"忽略"的应用名（小写子串）。
+    pub ignored_apps: Vec<String>,
+    /// 隐私过滤：被用户排除的域名。
+    pub excluded_domains: Vec<String>,
+    /// 工具执行时收集的引用记录（供前端展示"依据"）。
+    /// 用 Arc<Mutex> 是因为 execute_fn 是函数指针、ToolContext 以 `&` 借用传递，
+    /// 需要内部可变性；多轮工具调用会持续累积。
+    pub collected_references: Arc<Mutex<Vec<MemorySearchItem>>>,
+}
+
+impl<'a> ToolContext<'a> {
+    /// 按用户隐私设置过滤活动记录。
+    /// 工具结果会作为对话历史发给云端 LLM，必须先剔除被"忽略应用"/"排除域名"
+    /// 的窗口标题，否则会违背"本地优先、不经第三方"的隐私承诺。
+    pub fn filter_activities(
+        &self,
+        activities: Vec<crate::database::Activity>,
+    ) -> Vec<crate::database::Activity> {
+        crate::commands::filter_activities_by_privacy(
+            activities,
+            &self.ignored_apps,
+            &self.excluded_domains,
+        )
+    }
+
+    /// 记录工具命中的引用（按 source_id + timestamp + title 去重）。
+    pub fn collect_references(&self, items: Vec<MemorySearchItem>) {
+        if items.is_empty() {
+            return;
+        }
+        if let Ok(mut buf) = self.collected_references.lock() {
+            for item in items {
+                let dup = buf.iter().any(|b| {
+                    b.source_id == item.source_id
+                        && b.timestamp == item.timestamp
+                        && b.title == item.title
+                });
+                if !dup {
+                    buf.push(item);
+                }
+            }
+        }
+    }
+
+    /// 当前已收集的引用数（用于取"本轮增量"区间）。
+    pub fn references_len(&self) -> usize {
+        self.collected_references
+            .lock()
+            .map(|b| b.len())
+            .unwrap_or(0)
+    }
+
+    /// 取 [start..] 区间的引用克隆（StepResult 携带本轮增量）。
+    pub fn drain_from(&self, start: usize) -> Vec<MemorySearchItem> {
+        self.collected_references
+            .lock()
+            .map(|b| b.get(start..).map(|s| s.to_vec()).unwrap_or_default())
+            .unwrap_or_default()
+    }
+
+    /// 取出全部引用（executor 结束时填入 AgentResult）。
+    pub fn take_all_references(&self) -> Vec<MemorySearchItem> {
+        self.collected_references
+            .lock()
+            .map(|mut b| std::mem::take(&mut *b))
+            .unwrap_or_default()
+    }
 }
 
 // ══════════════════════════════════════════════════════════
@@ -250,6 +319,39 @@ fn search_memory_execute(ctx: &ToolContext, args: Value) -> Result<String, Strin
         .database
         .search_memory(query, date_from, date_to, 8)
         .map_err(|e| format!("搜索失败: {e}"))?;
+    // 隐私过滤：剔除被忽略应用/排除域名的搜索结果——窗口标题会作为工具结果
+    // 发给云端 LLM，必须与其它工具一样遵守用户的隐私设置。
+    let results: Vec<_> = results
+        .into_iter()
+        .filter(|r| {
+            if !ctx.ignored_apps.is_empty() {
+                if let Some(app) = &r.app_name {
+                    let app_lower = app.to_lowercase();
+                    if ctx
+                        .ignored_apps
+                        .iter()
+                        .any(|ig| app_lower.contains(ig) || ig.contains(&app_lower))
+                    {
+                        return false;
+                    }
+                }
+            }
+            if !ctx.excluded_domains.is_empty() {
+                let url_lower = r.browser_url.as_deref().unwrap_or("").to_lowercase();
+                let title_lower = r.title.to_lowercase();
+                if ctx.excluded_domains.iter().any(|ex| {
+                    let ex_l = ex.to_lowercase();
+                    url_lower.contains(&ex_l) || title_lower.contains(&ex_l)
+                }) {
+                    return false;
+                }
+            }
+            true
+        })
+        .collect();
+
+    // 收集引用供前端展示"依据"（空结果无害，collect_references 内部去重）。
+    ctx.collect_references(results.clone());
 
     // 格式化成 LLM 能理解的文字
     if results.is_empty() {
@@ -304,6 +406,7 @@ fn analyze_intents_execute(ctx: &ToolContext, args: Value) -> Result<String, Str
         .database
         .get_activities_in_range(Some(date_from), Some(date_to), 5000)
         .map_err(|e| format!("获取活动记录失败: {e}"))?;
+    let activities = ctx.filter_activities(activities);
 
     if activities.is_empty() {
         return Ok(format!(
@@ -359,6 +462,7 @@ fn aggregate_stats_execute(ctx: &ToolContext, args: Value) -> Result<String, Str
         .database
         .get_activities_in_range(Some(date_from), Some(date_to), 10000)
         .map_err(|e| format!("获取活动记录失败: {e}"))?;
+    let activities = ctx.filter_activities(activities);
 
     if activities.is_empty() {
         return Ok(format!("在 {date_from} ~ {date_to} 范围内无活动记录。"));
@@ -386,7 +490,7 @@ fn aggregate_stats_execute(ctx: &ToolContext, args: Value) -> Result<String, Str
     if app_durations.is_empty() {
         let cn = category_filter
             .as_deref()
-            .map(|k| get_category_name(k))
+            .map(get_category_name)
             .unwrap_or("所有");
         return Ok(format!("在 {date_from} ~ {date_to} 范围内未找到 '{cn}' 分类的活动记录。"));
     }
@@ -488,6 +592,7 @@ fn category_search_execute(ctx: &ToolContext, args: Value) -> Result<String, Str
         .database
         .get_activities_in_range(date_from, date_to, 10000)
         .map_err(|e| format!("获取活动记录失败: {e}"))?;
+    let activities = ctx.filter_activities(activities);
 
     // 按分类过滤
     let filtered: Vec<_> = activities
@@ -568,10 +673,12 @@ fn trend_comparison_execute(ctx: &ToolContext, args: Value) -> Result<String, St
         .database
         .get_activities_in_range(Some(pa_from), Some(pa_to), 10000)
         .map_err(|e| format!("获取时段A数据失败: {e}"))?;
+    let activities_a = ctx.filter_activities(activities_a);
     let activities_b = ctx
         .database
         .get_activities_in_range(Some(pb_from), Some(pb_to), 10000)
         .map_err(|e| format!("获取时段B数据失败: {e}"))?;
+    let activities_b = ctx.filter_activities(activities_b);
 
     // 按分类聚合
     let compute_cats = |acts: &[crate::database::Activity]| -> HashMap<String, i64> {

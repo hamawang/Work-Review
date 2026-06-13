@@ -50,7 +50,7 @@ impl IdleDetector {
         if similarity < 95 {
             // 屏幕有变化，不是空闲（终端输出、视频播放等）
             NO_CHANGE_COUNT.store(0, Ordering::Relaxed);
-            log::trace!("屏幕有变化 (相似度 {}%)，视为活跃", similarity);
+            log::trace!("屏幕有变化 (相似度 {similarity}%)，视为活跃");
             return false;
         }
 
@@ -60,17 +60,22 @@ impl IdleDetector {
         // 需要连续多次无变化才判定为空闲
         // 按 30 秒截图间隔计算，3 次约 1.5 分钟
         if count >= 3 {
-            log::debug!("确认空闲: 屏幕连续 {} 次无变化", count);
+            log::debug!("确认空闲: 屏幕连续 {count} 次无变化");
             return true;
         }
 
-        log::trace!("屏幕无变化 ({}/3)，继续观察", count);
+        log::trace!("屏幕无变化 ({count}/3)，继续观察");
         false
     }
 
     /// 重置空闲状态（用户有活动时调用）
     pub fn reset(&self) {
         NO_CHANGE_COUNT.store(0, Ordering::Relaxed);
+        // 同步清除哈希基线：否则用户离开→空闲确认→回来活动（触发 reset）后，
+        // 若屏幕恰好与离开时相似（同一文档/网页），会快速重新累计无变化计数，
+        // 把刚恢复活动的用户再次误判为空闲。存入 0 会在 confirm_idle_with_hash
+        // 中被当作"首次无历史"跳过，安全。
+        LAST_SCREENSHOT_HASH.store(0, Ordering::Relaxed);
     }
 
     /// 获取当前空闲秒数（供外部使用）

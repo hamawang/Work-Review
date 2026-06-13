@@ -604,26 +604,42 @@ fn resources_list() -> Vec<Value> {
 }
 
 fn handle_resource_read(uri: &str, state: &Arc<Mutex<AppState>>) -> Value {
-    let s = state.lock().unwrap_or_else(|e| e.into_inner());
+    let mut s = state.lock().unwrap_or_else(|e| e.into_inner());
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-    match uri {
+
+    // resources/read 必须与 tools/call 一样经过权限策略 + 脱敏。之前直接 get_timeline
+    // 会把含 OCR 文本/窗口标题/截图路径的完整记录未经 PolicyEnforcer 过滤地返回给
+    // MCP 客户端（AI 编码工具），绕过用户配置的脱敏规则。
+    let permission = match uri {
+        "timeline/today" => Permission::ReadActivities,
+        "sessions/current" => Permission::ReadSessions,
+        "stats/weekly" => Permission::ReadStats,
+        _ => return resource_result(uri, &format!("Unknown resource: {uri}")),
+    };
+    let source = CallSource::McpTool {
+        tool_name: format!("resource:{uri}"),
+        client_id: None,
+    };
+    let need_sanitize = match s.policy.check_permission(&source, permission) {
+        PolicyDecision::Deny => {
+            return resource_result(uri, &format!("权限被拒绝: 无 {:?} 权限", permission))
+        }
+        PolicyDecision::Allow => false,
+        PolicyDecision::AllowSanitized => true,
+    };
+
+    let raw_text = match uri {
         "timeline/today" => match s.db.get_timeline(&today, Some(50), None) {
-            Ok(activities) => resource_result(
-                uri,
-                &serde_json::to_string_pretty(&activities).unwrap_or_default(),
-            ),
-            Err(e) => resource_result(uri, &format!("Error: {e}")),
+            Ok(activities) => serde_json::to_string_pretty(&activities).unwrap_or_default(),
+            Err(e) => return resource_result(uri, &format!("Error: {e}")),
         },
         "sessions/current" => match s.db.get_timeline(&today, None, None) {
             Ok(activities) => {
                 let sessions =
                     work_review_core::work_intelligence::build_work_sessions(&activities);
-                resource_result(
-                    uri,
-                    &serde_json::to_string_pretty(&sessions).unwrap_or_default(),
-                )
+                serde_json::to_string_pretty(&sessions).unwrap_or_default()
             }
-            Err(e) => resource_result(uri, &format!("Error: {e}")),
+            Err(e) => return resource_result(uri, &format!("Error: {e}")),
         },
         "stats/weekly" => {
             let mut weekly = Vec::new();
@@ -635,13 +651,23 @@ fn handle_resource_read(uri: &str, state: &Arc<Mutex<AppState>>) -> Value {
                     weekly.push(json!({ "date": date, "total_duration": stats.total_duration, "screenshot_count": stats.screenshot_count }));
                 }
             }
-            resource_result(
-                uri,
-                &serde_json::to_string_pretty(&weekly).unwrap_or_default(),
-            )
+            serde_json::to_string_pretty(&weekly).unwrap_or_default()
         }
-        _ => resource_result(uri, &format!("Unknown resource: {uri}")),
-    }
+        _ => return resource_result(uri, &format!("Unknown resource: {uri}")),
+    };
+
+    // 必要时脱敏：解析 JSON → sanitize_value（删 screenshot_path/ocr_text、截断 window_title）→ 重新序列化
+    let final_text = if need_sanitize {
+        serde_json::from_str::<Value>(&raw_text)
+            .map(|mut v| {
+                sanitize_value(&mut v);
+                serde_json::to_string_pretty(&v).unwrap_or_else(|_| raw_text.clone())
+            })
+            .unwrap_or_else(|_| raw_text.clone())
+    } else {
+        raw_text
+    };
+    resource_result(uri, &final_text)
 }
 
 fn resource_result(uri: &str, text: &str) -> Value {

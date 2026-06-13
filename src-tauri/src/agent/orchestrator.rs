@@ -5,13 +5,14 @@
 //!
 //! 对应 Python: 05_orchestrator.py 里的 Orchestrator 类
 
+use super::events::StreamEvent;
 use super::executor::AgentExecutor;
-use super::memory::ConversationMemory;
 use super::model::Message;
-use super::tools::ToolRegistry;
 use crate::config::ModelConfig;
 use crate::database::Database;
 use crate::error::AppError;
+use tokio::sync::mpsc;
+use work_review_core::database::MemorySearchItem;
 
 // ══════════════════════════════════════════════════════════
 // 路径类型
@@ -138,11 +139,10 @@ pub fn route_query(question: &str, has_model: bool) -> RouteDecision {
 #[derive(Debug)]
 pub struct OrchestratorResult {
     pub answer: String,
-    pub path: QueryPath,
-    pub reason: String,
     pub used_ai: bool,
-    pub iterations: Option<usize>,
     pub tool_labels: Vec<String>,
+    /// 工具执行收集的引用记录（Agent 路径来自 executor，其它路径为空）
+    pub references: Vec<MemorySearchItem>,
 }
 
 /// Orchestrator — Agent 的"指挥官"
@@ -160,6 +160,9 @@ impl Orchestrator {
         database: &Database,
         history: &[Message],
         system_prompt: Option<&str>,
+        ignored_apps: &[String],
+        excluded_domains: &[String],
+        event_tx: Option<mpsc::Sender<StreamEvent>>,
     ) -> Result<OrchestratorResult, AppError> {
         let has_model = model_config
             .map(|c| !c.endpoint.trim().is_empty() && !c.model.trim().is_empty())
@@ -170,25 +173,28 @@ impl Orchestrator {
 
         // ② 执行对应路径
         match decision.path {
-            QueryPath::Direct => Ok(OrchestratorResult {
-                answer: direct_answer(question),
-                path: QueryPath::Direct,
-                reason: decision.reason,
-                used_ai: false,
-                iterations: None,
-                tool_labels: vec!["direct".to_string()],
-            }),
+            QueryPath::Direct => {
+                let answer = direct_answer(question);
+                let tool_labels = vec!["direct".to_string()];
+                emit_done(&event_tx, &answer, &[], &tool_labels);
+                Ok(OrchestratorResult {
+                    answer,
+                    used_ai: false,
+                    tool_labels,
+                    references: vec![],
+                })
+            }
 
             QueryPath::Fast => {
                 // FastPath：用规则查数据 + 简单格式化
-                let answer = fast_answer(question, database)?;
+                let answer = fast_answer(question, database, ignored_apps, excluded_domains)?;
+                let tool_labels = vec!["规则查询".to_string()];
+                emit_done(&event_tx, &answer, &[], &tool_labels);
                 Ok(OrchestratorResult {
                     answer,
-                    path: QueryPath::Fast,
-                    reason: decision.reason,
                     used_ai: false,
-                    iterations: None,
-                    tool_labels: vec!["规则查询".to_string()],
+                    tool_labels,
+                    references: vec![],
                 })
             }
 
@@ -197,7 +203,7 @@ impl Orchestrator {
                     AppError::Analysis("Agent 路径需要模型配置".to_string())
                 })?;
 
-                // AgentPath：调用 Stage 3 的 AgentExecutor
+                // AgentPath：调用 Stage 3 的 AgentExecutor（透传事件通道）
                 match AgentExecutor::run(
                     question,
                     config,
@@ -205,41 +211,65 @@ impl Orchestrator {
                     system_prompt,
                     history,
                     None,
+                    ignored_apps.to_vec(),
+                    excluded_domains.to_vec(),
+                    event_tx.clone(),
                 )
                 .await
                 {
-                    Ok(agent_result) => Ok(OrchestratorResult {
-                        answer: agent_result.answer,
-                        path: QueryPath::Agent,
-                        reason: decision.reason,
-                        used_ai: true,
-                        iterations: Some(agent_result.iterations),
-                        tool_labels: agent_result.tool_labels,
-                    }),
+                    Ok(agent_result) => {
+                        // Agent 内部各 return 点已 emit Done，此处不重复（避免双 Done）。
+                        Ok(OrchestratorResult {
+                            answer: agent_result.answer,
+                            used_ai: true,
+                            tool_labels: agent_result.tool_labels,
+                            references: agent_result.references,
+                        })
+                    }
                     Err(_e) => {
                         // Agent 失败 → 降级到 FastPath（不暴露内部错误细节）
-                        let answer = fast_answer(question, database)?;
+                        let answer =
+                            fast_answer(question, database, ignored_apps, excluded_domains)?;
+                        let tool_labels = vec!["降级查询".to_string()];
+                        emit_done(&event_tx, &answer, &[], &tool_labels);
                         Ok(OrchestratorResult {
                             answer,
-                            path: QueryPath::Fast,
-                            reason: format!("{}（Agent降级）", decision.reason),
                             used_ai: false,
-                            iterations: None,
-                            tool_labels: vec!["降级查询".to_string()],
+                            tool_labels,
+                            references: vec![],
                         })
                     }
                 }
             }
 
-            QueryPath::Fallback => Ok(OrchestratorResult {
-                answer: fallback_answer(),
-                path: QueryPath::Fallback,
-                reason: decision.reason,
-                used_ai: false,
-                iterations: None,
-                tool_labels: vec!["fallback".to_string()],
-            }),
+            QueryPath::Fallback => {
+                let answer = fallback_answer();
+                let tool_labels = vec!["fallback".to_string()];
+                emit_done(&event_tx, &answer, &[], &tool_labels);
+                Ok(OrchestratorResult {
+                    answer,
+                    used_ai: false,
+                    tool_labels,
+                    references: vec![],
+                })
+            }
         }
+    }
+}
+
+/// 推送终态 Done 事件（channel 满/关闭都不影响主流程）。
+fn emit_done(
+    tx: &Option<mpsc::Sender<StreamEvent>>,
+    answer: &str,
+    references: &[MemorySearchItem],
+    tool_labels: &[String],
+) {
+    if let Some(tx) = tx {
+        let _ = tx.try_send(StreamEvent::Done {
+            answer: answer.to_string(),
+            references: references.to_vec(),
+            tool_labels: tool_labels.to_vec(),
+        });
     }
 }
 
@@ -260,7 +290,12 @@ pub fn direct_answer(question: &str) -> String {
 }
 
 /// FastPath：规则快速查询
-pub fn fast_answer(question: &str, database: &Database) -> Result<String, AppError> {
+pub fn fast_answer(
+    question: &str,
+    database: &Database,
+    ignored_apps: &[String],
+    excluded_domains: &[String],
+) -> Result<String, AppError> {
     use work_review_core::categorize::{categorize_app, get_category_name, normalize_display_app_name};
 
     // 复用 parse_temporal_range（你在 Stage 0 修复过的函数）
@@ -270,6 +305,10 @@ pub fn fast_answer(question: &str, database: &Database) -> Result<String, AppErr
     let activities = database
         .get_activities_in_range(date_from.as_deref(), date_to.as_deref(), 10000)
         .map_err(|e| AppError::Analysis(format!("查询失败: {e}")))?;
+    // 应用隐私过滤：fast_answer 结果会直接展示给用户，不应出现被"忽略应用"/
+    // "排除域名"的窗口标题（与其它统计命令保持一致）。
+    let activities =
+        crate::commands::filter_activities_by_privacy(activities, ignored_apps, excluded_domains);
 
     if activities.is_empty() {
         return Ok(format!(

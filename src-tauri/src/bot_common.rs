@@ -67,7 +67,7 @@ pub fn build_device_list(config: &AppConfig, data_dir: &Path) -> Vec<DeviceEndpo
     if let Some(token) = read_api_token(data_dir) {
         devices.push(DeviceEndpoint {
             name: "本机".to_string(),
-            url: format!("http://{}:{}", host, port),
+            url: format!("http://{host}:{port}"),
             token,
             is_local: true,
         });

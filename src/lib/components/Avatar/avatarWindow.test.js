@@ -785,7 +785,7 @@ test('继续提醒卡片应为每种人格提供紧凑按钮文案与完整 tool
 test('桌宠气泡面板在非紧凑文案下应允许更长的英文文字换行，避免整段被裁断', () => {
   const popoverSource = readFileSync(new URL('./AvatarPopover.svelte', import.meta.url), 'utf8');
 
-  assert.match(popoverSource, /width: min\(88vw, 336px\); min-width: 180px; max-width: min\(88vw, 336px\);/);
+  assert.match(popoverSource, /width: min\(82vw, 336px\); min-width: 160px; max-width: min\(82vw, 336px\);/);
   assert.match(popoverSource, /max-height: 140px/);
   assert.match(popoverSource, /word-break: normal/);
   assert.match(popoverSource, /overflow-wrap: anywhere/);

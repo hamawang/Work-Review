@@ -8,8 +8,9 @@ use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use subtle::ConstantTimeEq;
 
-/// 钉钉签名允许的时间窗口：±1 小时（钉钉 timestamp 单位为毫秒）。
-const DINGTALK_SIGN_WINDOW_MS: i64 = 60 * 60 * 1000;
+/// 钉钉签名允许的时间窗口：±5 分钟（与企微一致；钉钉 timestamp 单位为毫秒）。
+/// 钉钉回调通常秒级到达，5 分钟窗口足够；收紧后避免 ±1 小时窗口内被截获请求重放。
+const DINGTALK_SIGN_WINDOW_MS: i64 = 5 * 60 * 1000;
 
 pub struct DingtalkResponse {
     pub status: u16,
@@ -35,7 +36,7 @@ fn verify_dingtalk_sign(app_secret: &str, timestamp: &str, sign: &str) -> bool {
     use sha2::Sha256;
     type HmacSha256 = Hmac<Sha256>;
 
-    let message = format!("{}\n{}", timestamp, app_secret);
+    let message = format!("{timestamp}\n{app_secret}");
     let mut mac = match HmacSha256::new_from_slice(app_secret.as_bytes()) {
         Ok(m) => m,
         Err(_) => return false,

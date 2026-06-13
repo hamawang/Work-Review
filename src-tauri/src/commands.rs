@@ -252,7 +252,7 @@ fn normalize_saved_report_ai_mode(value: &str) -> String {
 }
 
 fn build_daily_report_export_path(export_dir: &Path, date: &str) -> PathBuf {
-    let safe_date = date.replace('/', "-").replace('\\', "-");
+    let safe_date = date.replace(['/', '\\'], "-");
     export_dir.join(format!("{safe_date}.md"))
 }
 
@@ -685,7 +685,7 @@ fn format_memory_references(references: &[MemorySearchItem]) -> String {
 
             if let Some(duration) = item.duration {
                 if duration > 0 {
-                    parts.push(format!("时长: {}秒", duration));
+                    parts.push(format!("时长: {duration}秒"));
                 }
             }
 
@@ -783,10 +783,10 @@ fn is_low_signal_reference(item: &MemorySearchItem) -> bool {
     menu_hits >= 5 || ((path_like_title || generic_title || browser_shell_title) && menu_hits >= 3)
 }
 
-fn filter_reference_items<'a>(
-    references: &'a [MemorySearchItem],
+fn filter_reference_items(
+    references: &[MemorySearchItem],
     limit: usize,
-) -> Vec<&'a MemorySearchItem> {
+) -> Vec<&MemorySearchItem> {
     references
         .iter()
         .filter(|item| !is_low_signal_reference(item))
@@ -833,7 +833,7 @@ fn build_fallback_memory_answer(question: &str, references: &[MemorySearchItem])
         }
         if let Some(duration) = item.duration {
             if duration > 0 {
-                answer.push_str(&format!("，时长约 {} 秒", duration));
+                answer.push_str(&format!("，时长约 {duration} 秒"));
             }
         }
         if !item.excerpt.is_empty() {
@@ -868,37 +868,6 @@ fn build_assistant_system_prompt(locale: AppLocale) -> &'static str {
     }
 }
 
-fn assistant_output_language_requirement(locale: AppLocale) -> &'static str {
-    match locale {
-        AppLocale::ZhCn => "8. 最终回答必须使用简体中文，不要混入英文标题或繁体写法。\n",
-        AppLocale::ZhTw => "8. 最終回答必須使用繁體中文，不要混入簡體標題或英文標題。\n",
-        AppLocale::En => {
-            "8. The final answer must be written in English, including headings and bullets.\n"
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AssistantTool {
-    Memory,
-    Sessions,
-    Intents,
-    Review,
-    Todos,
-}
-
-impl AssistantTool {
-    fn label(&self) -> &'static str {
-        match self {
-            AssistantTool::Memory => "记忆检索",
-            AssistantTool::Sessions => "Session 聚合",
-            AssistantTool::Intents => "意图识别",
-            AssistantTool::Review => "周报复盘",
-            AssistantTool::Todos => "待办提取",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(dead_code)]
 enum AssistantQuestionKind {
@@ -918,37 +887,6 @@ enum AssistantReasoningMode {
     AiEnhanced,
 }
 
-impl AssistantQuestionKind {
-    fn label(&self, locale: AppLocale) -> &'static str {
-        match (locale, self) {
-            (AppLocale::En, AssistantQuestionKind::StageSummary) => "stage summary",
-            (AppLocale::En, AssistantQuestionKind::OutcomeRecap) => "outcome recap",
-            (AppLocale::En, AssistantQuestionKind::ProcessRecap) => "process recap",
-            (AppLocale::En, AssistantQuestionKind::EvidenceQuery) => "evidence query",
-            (AppLocale::En, AssistantQuestionKind::TimeStat) => "time statistics",
-            (AppLocale::En, AssistantQuestionKind::Comparison) => "comparison",
-            (AppLocale::En, AssistantQuestionKind::Listing) => "listing",
-            (AppLocale::En, AssistantQuestionKind::Freeform) => "freeform",
-            (AppLocale::ZhTw, AssistantQuestionKind::StageSummary) => "階段總結",
-            (AppLocale::ZhTw, AssistantQuestionKind::OutcomeRecap) => "結果復盤",
-            (AppLocale::ZhTw, AssistantQuestionKind::ProcessRecap) => "過程復盤",
-            (AppLocale::ZhTw, AssistantQuestionKind::EvidenceQuery) => "依據追問",
-            (AppLocale::ZhTw, AssistantQuestionKind::TimeStat) => "時間統計",
-            (AppLocale::ZhTw, AssistantQuestionKind::Comparison) => "對比分析",
-            (AppLocale::ZhTw, AssistantQuestionKind::Listing) => "清單列舉",
-            (AppLocale::ZhTw, AssistantQuestionKind::Freeform) => "自由提問",
-            (_, AssistantQuestionKind::StageSummary) => "阶段总结",
-            (_, AssistantQuestionKind::OutcomeRecap) => "结果复盘",
-            (_, AssistantQuestionKind::ProcessRecap) => "过程复盘",
-            (_, AssistantQuestionKind::EvidenceQuery) => "依据追问",
-            (_, AssistantQuestionKind::TimeStat) => "时间统计",
-            (_, AssistantQuestionKind::Comparison) => "对比分析",
-            (_, AssistantQuestionKind::Listing) => "清单列举",
-            (_, AssistantQuestionKind::Freeform) => "自由提问",
-        }
-    }
-}
-
 fn build_history_context(history: &[AssistantChatMessage]) -> String {
     history
         .iter()
@@ -960,47 +898,6 @@ fn build_history_context(history: &[AssistantChatMessage]) -> String {
         .map(|message| format!("{}: {}", message.role, message.content.trim()))
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-/// Extract contextual time keywords from recent user messages to improve
-/// continuity across turns (e.g. "今天", "昨天", "本周", "最近").
-fn extract_contextual_entities(history: &[AssistantChatMessage], locale: AppLocale) -> String {
-    let zh_keywords = ["今天", "昨天", "本周", "上周", "本月", "上月", "最近"];
-    let en_keywords = [
-        "today",
-        "yesterday",
-        "this week",
-        "last week",
-        "this month",
-        "last month",
-        "recently",
-    ];
-    let keywords: &[&str] = match locale {
-        AppLocale::En => &en_keywords,
-        _ => &zh_keywords,
-    };
-    let mut found = Vec::new();
-
-    for msg in history.iter().rev().take(6) {
-        if msg.role != "user" {
-            continue;
-        }
-        for keyword in keywords {
-            if msg.content.contains(keyword) && !found.contains(&(*keyword).to_string()) {
-                found.push(keyword.to_string());
-            }
-        }
-    }
-
-    if found.is_empty() {
-        String::new()
-    } else {
-        match locale {
-            AppLocale::En => format!("Contextual time keywords mentioned: {}", found.join(", ")),
-            AppLocale::ZhTw => format!("上下文提及的時間關鍵詞：{}", found.join("、")),
-            AppLocale::ZhCn => format!("上下文提及的时间关键词：{}", found.join("、")),
-        }
-    }
 }
 
 fn is_short_follow_up_question(question: &str) -> bool {
@@ -1024,33 +921,6 @@ fn is_short_follow_up_question(question: &str) -> bool {
         ]
         .iter()
         .any(|pattern| normalized.contains(pattern))
-}
-
-fn assistant_reasoning_mode(model_config: Option<&ModelConfig>) -> AssistantReasoningMode {
-    if model_config.is_some_and(is_text_model_available) {
-        AssistantReasoningMode::AiEnhanced
-    } else {
-        AssistantReasoningMode::Basic
-    }
-}
-
-fn build_contextual_query(question: &str, history: &[AssistantChatMessage]) -> String {
-    let trimmed = question.trim();
-    if trimmed.chars().count() >= 8 && !is_short_follow_up_question(trimmed) {
-        return trimmed.to_string();
-    }
-
-    let previous_user = history
-        .iter()
-        .rev()
-        .find(|message| message.role == "user" && message.content.trim() != trimmed)
-        .map(|message| message.content.trim().to_string());
-
-    if let Some(previous_user) = previous_user {
-        format!("{previous_user} {trimmed}")
-    } else {
-        trimmed.to_string()
-    }
 }
 
 fn build_question_analysis_context(question: &str, history: &[AssistantChatMessage]) -> String {
@@ -1321,440 +1191,6 @@ fn detect_assistant_question_kind(
     detect_assistant_question_kind_with_mode(question, history, AssistantReasoningMode::Basic)
 }
 
-fn unique_assistant_tools(tools: Vec<AssistantTool>) -> Vec<AssistantTool> {
-    let mut unique = Vec::new();
-    for tool in tools {
-        if !unique.contains(&tool) {
-            unique.push(tool);
-        }
-    }
-    unique
-}
-
-fn map_question_kind_to_tools(kind: AssistantQuestionKind) -> Vec<AssistantTool> {
-    match kind {
-        AssistantQuestionKind::StageSummary => {
-            vec![
-                AssistantTool::Review,
-                AssistantTool::Intents,
-                AssistantTool::Memory,
-            ]
-        }
-        AssistantQuestionKind::OutcomeRecap => vec![
-            AssistantTool::Review,
-            AssistantTool::Intents,
-            AssistantTool::Todos,
-            AssistantTool::Memory,
-        ],
-        AssistantQuestionKind::ProcessRecap => {
-            vec![
-                AssistantTool::Sessions,
-                AssistantTool::Intents,
-                AssistantTool::Memory,
-            ]
-        }
-        AssistantQuestionKind::EvidenceQuery => vec![
-            AssistantTool::Memory,
-            AssistantTool::Sessions,
-            AssistantTool::Intents,
-        ],
-        AssistantQuestionKind::TimeStat => vec![
-            AssistantTool::Intents,
-            AssistantTool::Sessions,
-            AssistantTool::Memory,
-        ],
-        AssistantQuestionKind::Comparison => vec![
-            AssistantTool::Review,
-            AssistantTool::Intents,
-            AssistantTool::Sessions,
-            AssistantTool::Memory,
-        ],
-        AssistantQuestionKind::Listing => vec![
-            AssistantTool::Sessions,
-            AssistantTool::Intents,
-            AssistantTool::Memory,
-        ],
-        AssistantQuestionKind::Freeform => vec![
-            AssistantTool::Memory,
-            AssistantTool::Sessions,
-            AssistantTool::Intents,
-            AssistantTool::Review,
-            AssistantTool::Todos,
-        ],
-    }
-}
-
-fn detect_assistant_tools_with_history(
-    question: &str,
-    history: &[AssistantChatMessage],
-    mode: AssistantReasoningMode,
-) -> Vec<AssistantTool> {
-    let kind = detect_assistant_question_kind_with_mode(question, history, mode);
-    let context = build_question_analysis_context(question, history);
-    let mut tools = map_question_kind_to_tools(kind);
-
-    if ["session", "工作段", "时段", "切换"]
-        .iter()
-        .any(|pattern| context.contains(pattern))
-    {
-        tools.push(AssistantTool::Sessions);
-    }
-
-    if ["待办", "todo", "后续", "下一步", "没收口"]
-        .iter()
-        .any(|pattern| context.contains(pattern))
-    {
-        tools.push(AssistantTool::Todos);
-    }
-
-    if ["复盘", "总结", "回顾", "这周", "本周", "上周"]
-        .iter()
-        .any(|pattern| context.contains(pattern))
-    {
-        tools.push(AssistantTool::Review);
-    }
-
-    if ["重心", "方向", "主要工作", "主要做了什么"]
-        .iter()
-        .any(|pattern| context.contains(pattern))
-    {
-        tools.push(AssistantTool::Intents);
-    }
-
-    tools.push(AssistantTool::Memory);
-    unique_assistant_tools(tools)
-}
-
-fn summarize_sessions_for_prompt(sessions: &[WorkSession]) -> String {
-    if sessions.is_empty() {
-        return "无 session 数据".to_string();
-    }
-
-    sessions
-        .iter()
-        .take(6)
-        .enumerate()
-        .map(|(index, session)| {
-            format!(
-                "{}. {} {}-{}，{}，主应用：{}，意图：{}，标题：{}",
-                index + 1,
-                session.date,
-                session.start_timestamp,
-                session.end_timestamp,
-                crate::analysis::format_duration(session.duration),
-                session.dominant_app,
-                session.intent_label,
-                session.title
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn summarize_intents_for_prompt(result: &IntentAnalysisResult) -> String {
-    if result.summary.is_empty() {
-        return "无意图识别结果".to_string();
-    }
-
-    result
-        .summary
-        .iter()
-        .take(6)
-        .map(|item| {
-            format!(
-                "- {}：{}，{} 段",
-                item.label,
-                crate::analysis::format_duration(item.duration),
-                item.session_count
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn summarize_todos_for_prompt(result: &TodoExtractionResult) -> String {
-    if result.items.is_empty() {
-        return "无待办提取结果".to_string();
-    }
-
-    result
-        .items
-        .iter()
-        .take(8)
-        .map(|item| {
-            format!(
-                "- {}（{}，{}，置信度 {}，{}）",
-                item.title, item.date, item.source_app, item.confidence, item.reason
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn build_assistant_prompt(
-    question: &str,
-    question_kind: AssistantQuestionKind,
-    history: &[AssistantChatMessage],
-    date_from: Option<&str>,
-    date_to: Option<&str>,
-    references: &[MemorySearchItem],
-    sessions: Option<&[WorkSession]>,
-    intents: Option<&IntentAnalysisResult>,
-    review: Option<&WeeklyReviewResult>,
-    todos: Option<&TodoExtractionResult>,
-    locale: AppLocale,
-) -> String {
-    let range = match (date_from, date_to) {
-        (Some(start), Some(end)) if start == end => match locale {
-            AppLocale::En => format!("{start} (that day)"),
-            AppLocale::ZhTw => format!("{start} \u{7576}\u{5929}"),
-            AppLocale::ZhCn => format!("{start} \u{5f53}\u{5929}"),
-        },
-        (Some(start), Some(end)) => match locale {
-            AppLocale::En => format!("{start} to {end}"),
-            AppLocale::ZhTw => format!("{start} \u{5230} {end}"),
-            AppLocale::ZhCn => format!("{start} \u{5230} {end}"),
-        },
-        (Some(start), None) => match locale {
-            AppLocale::En => format!("after {start}"),
-            AppLocale::ZhTw => format!("{start} \u{4e4b}\u{5f8c}"),
-            AppLocale::ZhCn => format!("{start} \u{4e4b}\u{540e}"),
-        },
-        (None, Some(end)) => match locale {
-            AppLocale::En => format!("before {end}"),
-            AppLocale::ZhTw => format!("{end} \u{4e4b}\u{524d}"),
-            AppLocale::ZhCn => format!("{end} \u{4e4b}\u{524d}"),
-        },
-        (None, None) => match locale {
-            AppLocale::En => "all available records".to_string(),
-            AppLocale::ZhTw => "\u{5168}\u{90e8}\u{53ef}\u{7528}\u{8a18}\u{9304}".to_string(),
-            AppLocale::ZhCn => "\u{5168}\u{90e8}\u{53ef}\u{7528}\u{8bb0}\u{5f55}".to_string(),
-        },
-    };
-
-    let mut prompt = match locale {
-        AppLocale::En => format!(
-            "User question: {question}\nQuestion type: {}\nData range: {range} (all data below is within this range; information outside the range is unavailable)\n\nAnswer in an analytical-review style. Strictly use the data below; do not fabricate facts. State clearly when evidence is insufficient.\n",
-            question_kind.label(locale)
-        ),
-        AppLocale::ZhTw => format!(
-            "\u{4f7f}\u{7528}\u{8005}\u{554f}\u{984c}\u{ff1a}{question}\n\u{554f}\u{984c}\u{985e}\u{578b}\u{ff1a}{}\n\u{8cc7}\u{6599}\u{6642}\u{9593}\u{7bc4}\u{570d}\u{ff1a}{range}\u{ff08}\u{4ee5}\u{4e0b}\u{6240}\u{6709}\u{8cc7}\u{6599}\u{5747}\u{5728}\u{6b64}\u{7bc4}\u{570d}\u{5167}\u{ff0c}\u{8d85}\u{51fa}\u{7bc4}\u{570d}\u{7684}\u{8cc7}\u{8a0a}\u{4e0d}\u{53ef}\u{7528}\u{ff09}\n\n\u{8acb}\u{7528}\u{300c}\u{5206}\u{6790}\u{5fa9}\u{76e4}\u{578b}\u{300d}\u{98a8}\u{683c}\u{76f4}\u{63a5}\u{56de}\u{7b54}\u{3002}\u{56b4}\u{683c}\u{57fa}\u{65bc}\u{4ee5}\u{4e0b}\u{8cc7}\u{6599}\u{ff0c}\u{4e0d}\u{8981}\u{7de8}\u{9020}\u{672a}\u{51fa}\u{73fe}\u{7684}\u{4e8b}\u{5be6}\u{ff1b}\u{8b49}\u{64da}\u{4e0d}\u{8db3}\u{6642}\u{660e}\u{78ba}\u{8aaa}\u{660e}\u{3002}\n",
-            question_kind.label(locale)
-        ),
-        AppLocale::ZhCn => format!(
-            "\u{7528}\u{6237}\u{95ee}\u{9898}\u{ff1a}{question}\n\u{95ee}\u{9898}\u{7c7b}\u{578b}\u{ff1a}{}\n\u{6570}\u{636e}\u{65f6}\u{95f4}\u{8303}\u{56f4}\u{ff1a}{range}\u{ff08}\u{4ee5}\u{4e0b}\u{6240}\u{6709}\u{6570}\u{636e}\u{5747}\u{5728}\u{6b64}\u{8303}\u{56f4}\u{5185}\u{ff0c}\u{8d85}\u{51fa}\u{8303}\u{56f4}\u{7684}\u{4fe1}\u{606f}\u{4e0d}\u{53ef}\u{7528}\u{ff09}\n\n\u{8bf7}\u{7528}\u{201c}\u{5206}\u{6790}\u{590d}\u{76d8}\u{578b}\u{201d}\u{98ce}\u{683c}\u{76f4}\u{63a5}\u{56de}\u{7b54}\u{3002}\u{4e25}\u{683c}\u{57fa}\u{4e8e}\u{4ee5}\u{4e0b}\u{6570}\u{636e}\u{ff0c}\u{4e0d}\u{8981}\u{7f16}\u{9020}\u{672a}\u{51fa}\u{73b0}\u{7684}\u{4e8b}\u{5b9e}\u{ff1b}\u{8bc1}\u{636e}\u{4e0d}\u{8db3}\u{65f6}\u{660e}\u{786e}\u{8bf4}\u{660e}\u{3002}\n",
-            question_kind.label(locale)
-        ),
-    };
-
-    let recent_history: Vec<_> = history.iter().rev().take(8).collect::<Vec<_>>();
-    if !recent_history.is_empty() {
-        prompt.push_str(match locale {
-            AppLocale::En => "\n[Conversation context]\n",
-            AppLocale::ZhTw => "\n\u{3010}\u{5c0d}\u{8a71}\u{4e0a}\u{4e0b}\u{6587}\u{3011}\n",
-            AppLocale::ZhCn => "\n\u{3010}\u{5bf9}\u{8bdd}\u{4e0a}\u{4e0b}\u{6587}\u{3011}\n",
-        });
-        for msg in recent_history.into_iter().rev() {
-            let role_label = match locale {
-                AppLocale::En => {
-                    if msg.role == "user" {
-                        "User"
-                    } else {
-                        "Assistant"
-                    }
-                }
-                AppLocale::ZhTw => {
-                    if msg.role == "user" {
-                        "\u{4f7f}\u{7528}\u{8005}"
-                    } else {
-                        "\u{52a9}\u{624b}"
-                    }
-                }
-                AppLocale::ZhCn => {
-                    if msg.role == "user" {
-                        "\u{7528}\u{6237}"
-                    } else {
-                        "\u{52a9}\u{624b}"
-                    }
-                }
-            };
-            let content = msg.content.trim();
-            let short = if content.chars().count() > 200 {
-                format!("{}\u{2026}", content.chars().take(200).collect::<String>())
-            } else {
-                content.to_string()
-            };
-            match locale {
-                AppLocale::En => prompt.push_str(&format!("{role_label}: {short}\n")),
-                _ => prompt.push_str(&format!("{role_label}\u{ff1a}{short}\n")),
-            }
-        }
-    }
-
-    let entity_ctx = extract_contextual_entities(history, locale);
-    if !entity_ctx.is_empty() {
-        prompt.push_str(&format!("\n{entity_ctx}\n"));
-    }
-
-    if !references.is_empty() {
-        let filtered_references = filter_reference_items(references, 5);
-        prompt.push_str(match locale {
-            AppLocale::En => "\n[Related memories]\n",
-            AppLocale::ZhTw => "\n【相關記憶】\n",
-            AppLocale::ZhCn => "\n【相关记忆】\n",
-        });
-        if filtered_references.is_empty() {
-            prompt.push_str(match locale {
-                AppLocale::En => "Direct hits have low signal quality (mostly window titles or menu noise). Prioritize review summaries, intent distributions, and sessions.\n",
-                AppLocale::ZhTw => "直接命中的原始記錄區分度不高，多數是視窗標題或選單雜訊，請優先參考階段復盤、意圖分布和工作段。\n",
-                AppLocale::ZhCn => "直接命中的原始记录区分度不高，多数是窗口标题或菜单噪声，请优先参考阶段复盘、意图分布和工作段。\n",
-            });
-        } else {
-            let filtered = filtered_references.into_iter().cloned().collect::<Vec<_>>();
-            prompt.push_str(&format_memory_references(&filtered));
-        }
-        prompt.push('\n');
-    }
-
-    if let Some(sessions) = sessions {
-        prompt.push_str(match locale {
-            AppLocale::En => "\n[Work sessions]\n",
-            AppLocale::ZhTw => "\n【工作段】\n",
-            AppLocale::ZhCn => "\n【工作段】\n",
-        });
-        prompt.push_str(&summarize_sessions_for_prompt(sessions));
-        prompt.push('\n');
-    }
-
-    if let Some(intents) = intents {
-        prompt.push_str(match locale {
-            AppLocale::En => "\n[Intent distribution]\n",
-            AppLocale::ZhTw => "\n【意圖分布】\n",
-            AppLocale::ZhCn => "\n【意图分布】\n",
-        });
-        prompt.push_str(&summarize_intents_for_prompt(intents));
-        prompt.push('\n');
-    }
-
-    if let Some(review) = review {
-        prompt.push_str(match locale {
-            AppLocale::En => "\n[Phase review]\n",
-            AppLocale::ZhTw => "\n【階段復盤】\n",
-            AppLocale::ZhCn => "\n【阶段复盘】\n",
-        });
-        prompt.push_str(&review.markdown);
-        prompt.push('\n');
-    }
-
-    if let Some(todos) = todos {
-        prompt.push_str(match locale {
-            AppLocale::En => "\n[To-do items]\n",
-            AppLocale::ZhTw => "\n【待辦事項】\n",
-            AppLocale::ZhCn => "\n【待办事项】\n",
-        });
-        prompt.push_str(&summarize_todos_for_prompt(todos));
-        prompt.push('\n');
-    }
-
-    // 主动洞察：检测异常模式
-    let insights = generate_active_insights(intents, review, sessions, locale);
-    if !insights.is_empty() {
-        prompt.push_str(match locale {
-            AppLocale::En => "\n[Active insights]\nThe following anomalies were detected — mention them naturally in your answer:\n",
-            AppLocale::ZhTw => "\n【主動洞察】\n以下是從資料中偵測到的異常模式，請在回答中自然提及：\n",
-            AppLocale::ZhCn => "\n【主动洞察】\n以下是从数据中检测到的异常模式，请在回答中自然提及：\n",
-        });
-        for insight in &insights {
-            prompt.push_str(&format!("- {insight}\n"));
-        }
-    }
-
-    let output_requirements = match (locale, question_kind) {
-        (AppLocale::ZhCn, AssistantQuestionKind::TimeStat) => {
-            "\n输出要求：\n1. 用中文回答，直接回应用户关于时间的问题。\n2. 使用清晰的 Markdown 排版。\n3. 输出结构：`## 结论`（含时长数据摘要）、`## 时间分布`（按意图或 session 拆分）。\n4. 数据不足时明确说明，不要编造。\n5. 不要提及内部分析工具名称。\n"
-        }
-        (AppLocale::ZhCn, AssistantQuestionKind::Comparison) => {
-            "\n输出要求：\n1. 用中文回答，聚焦对比分析。\n2. 使用清晰的 Markdown 排版。\n3. 输出结构：`## 结论`（对比核心差异）、`## 对比分析`（逐维度对比）。\n4. 每个维度说明变化方向和幅度。\n5. 不要提及内部分析工具名称。\n"
-        }
-        (AppLocale::ZhCn, AssistantQuestionKind::Listing) => {
-            "\n输出要求：\n1. 用中文回答，列出所有相关条目。\n2. 使用无序列表，一行一条，保持简洁。\n3. 输出结构：`## 清单`（完整列举）、`## 补充说明`（可选）。\n4. 不要遗漏，但也不要虚构不存在的条目。\n5. 不要提及内部分析工具名称。\n"
-        }
-        (AppLocale::ZhCn, AssistantQuestionKind::Freeform) => {
-            "\n输出要求：\n1. 用中文回答，灵活回应用户问题。\n2. 使用清晰的 Markdown 排版。\n3. 根据问题性质自由组织内容，可包含数据、分析、建议等。\n4. 先给出核心回答，再展开细节。\n5. 不要提及内部分析工具名称。\n6. 不要虚构日期、任务或结果。\n"
-        }
-        (AppLocale::ZhCn, _) => {
-            "\n输出要求：\n1. 用中文回答，直接回应用户的问题，不要泛泛而谈。\n2. 使用清晰的 Markdown 排版（标题、列表、加粗等）。\n3. 必须按以下固定结构输出：`## 结论`、`## 结果概览`、`## 过程分析`、`## 依据补充`、`## 复盘总结`。\n4. 整体风格是\u{201c}先结果，再过程\u{201d}，每个结论自然带上依据，不要写成审计报告。\n5. 列举时使用无序列表，一行一条。\n6. 不要提及内部分析工具名称。\n7. 不要虚构日期、任务或结果。\n"
-        }
-        (AppLocale::ZhTw, AssistantQuestionKind::TimeStat) => {
-            "\n輸出要求：\n1. 請用繁體中文回答，聚焦時間統計。\n2. 使用清楚的 Markdown 排版。\n3. 輸出結構：`## 結論`（含時長數據摘要）、`## 時間分布`（按意圖或 session 拆分）。\n4. 數據不足時明確說明，不要編造。\n5. 不要提及內部分析工具名稱。\n"
-        }
-        (AppLocale::ZhTw, AssistantQuestionKind::Comparison) => {
-            "\n輸出要求：\n1. 請用繁體中文回答，聚焦對比分析。\n2. 使用清楚的 Markdown 排版。\n3. 輸出結構：`## 結論`（對比核心差異）、`## 對比分析`（逐維度對比）。\n4. 每個維度說明變化方向和幅度。\n5. 不要提及內部分析工具名稱。\n"
-        }
-        (AppLocale::ZhTw, AssistantQuestionKind::Listing) => {
-            "\n輸出要求：\n1. 請用繁體中文回答，列出所有相關條目。\n2. 使用無序列表，一行一條，保持簡潔。\n3. 輸出結構：`## 清單`（完整列舉）、`## 補充說明`（可選）。\n4. 不要遺漏，但也不要虛構不存在的條目。\n5. 不要提及內部分析工具名稱。\n"
-        }
-        (AppLocale::ZhTw, AssistantQuestionKind::Freeform) => {
-            "\n輸出要求：\n1. 請用繁體中文回答，靈活回應使用者問題。\n2. 使用清楚的 Markdown 排版。\n3. 根據問題性質自由組織內容，可包含數據、分析、建議等。\n4. 先給出核心回答，再展開細節。\n5. 不要提及內部分析工具名稱。\n6. 不要虛構日期、任務或結果。\n"
-        }
-        (AppLocale::ZhTw, _) => {
-            "\n輸出要求：\n1. 請用繁體中文回答，直接回應使用者問題，不要空泛。\n2. 使用清楚的 Markdown 排版（標題、列表、粗體等）。\n3. 必須按以下固定結構輸出：`## 結論`、`## 結果概覽`、`## 過程分析`、`## 依據補充`、`## 復盤總結`。\n4. 整體風格是先結果、再過程，每個結論都要自然帶出依據。\n5. 列舉時使用無序列表，一行一條。\n6. 不要提及內部分析工具名稱。\n7. 不要虛構日期、任務或結果。\n"
-        }
-        (AppLocale::En, AssistantQuestionKind::TimeStat) => {
-            "\nOutput requirements:\n1. Answer in English, focus on time statistics.\n2. Use clear Markdown formatting.\n3. Use this structure: `## Conclusion` (with duration summary), `## Time Distribution` (by intent or session).\n4. Clearly state when data is insufficient; do not fabricate.\n5. Do not mention internal tool names.\n"
-        }
-        (AppLocale::En, AssistantQuestionKind::Comparison) => {
-            "\nOutput requirements:\n1. Answer in English, focus on comparative analysis.\n2. Use clear Markdown formatting.\n3. Use this structure: `## Conclusion` (core differences), `## Comparison` (dimension-by-dimension).\n4. For each dimension, state direction and magnitude of change.\n5. Do not mention internal tool names.\n"
-        }
-        (AppLocale::En, AssistantQuestionKind::Listing) => {
-            "\nOutput requirements:\n1. Answer in English, list all relevant items.\n2. Use unordered bullet lists, one item per line, keep it concise.\n3. Use this structure: `## Listing` (complete list), `## Notes` (optional).\n4. Do not omit real items or fabricate non-existent ones.\n5. Do not mention internal tool names.\n"
-        }
-        (AppLocale::En, AssistantQuestionKind::Freeform) => {
-            "\nOutput requirements:\n1. Answer in English, respond flexibly to the user's question.\n2. Use clear Markdown formatting.\n3. Organize content freely based on the question nature; may include data, analysis, or suggestions.\n4. Lead with the core answer, then expand with details.\n5. Do not mention internal tool names.\n6. Do not invent dates, tasks, or outcomes.\n"
-        }
-        (AppLocale::En, _) => {
-            "\nOutput requirements:\n1. Answer in English and respond to the user's question directly.\n2. Use clear Markdown formatting with headings, lists, and bold text where helpful.\n3. Use this exact structure: `## Conclusion`, `## Overview`, `## Process Analysis`, `## Evidence`, `## Recap`.\n4. Lead with results first, then explain the process and evidence.\n5. When listing points, use unordered bullets with one point per line.\n6. Do not mention internal tool names.\n7. Do not invent dates, tasks, or outcomes.\n"
-        }
-    };
-    prompt.push_str(output_requirements);
-
-    let few_shot = match (locale, question_kind) {
-        (AppLocale::En, AssistantQuestionKind::TimeStat) => {
-            "\n[Example]\nUser: How much time did I spend coding?\nAssistant:\n## Conclusion\nCoding-related work accounted for ~45% of total time, mainly in code reviews and feature development.\n## Time Distribution\n- **Code review**: 2h 15m, 28%\n- **Feature dev**: 1h 30m, 19%\n- **Documentation**: 45m, 10%\n\n"
-        }
-        (AppLocale::En, AssistantQuestionKind::Comparison) => {
-            "\n[Example]\nUser: How does this week compare to last week?\nAssistant:\n## Conclusion\nTotal hours increased ~20%, but deep-work sessions decreased.\n## Comparison\n- **Total hours**: 25h this week vs 21h last week\n- **Deep work**: 6 blocks this week vs 9 last week\n- **Context switching**: More frequent this week, may hurt efficiency\n\n"
-        }
-        (AppLocale::En, AssistantQuestionKind::Listing) => {
-            "\n[Example]\nUser: List all completed tasks\nAssistant:\n## Listing\n- Fix login page styling (Apr 25)\n- Refactor user permissions module (Apr 26)\n- Write API documentation (Apr 27)\n- Deploy and verify test environment (Apr 28)\n\n"
-        }
-        (AppLocale::ZhTw, AssistantQuestionKind::TimeStat) => {
-            "\n【示例】\n使用者：花了多少時間在編碼上？\n助手：\n## 結論\n這段時間編碼相關工作約佔總時長的 45%，主要集中在程式碼審查和功能開發。\n## 時間分布\n- **程式碼審查**：2 小時 15 分鐘，佔 28%\n- **功能開發**：1 小時 30 分鐘，佔 19%\n- **文件撰寫**：45 分鐘，佔 10%\n\n"
-        }
-        (AppLocale::ZhTw, AssistantQuestionKind::Comparison) => {
-            "\n【示例】\n使用者：和上週相比有什麼變化？\n助手：\n## 結論\n本週總投入時間比上週增加約 20%，但深度工作時段減少了。\n## 對比分析\n- **總時長**：本週 25 小時 vs 上週 21 小時\n- **深度工作**：本週 6 段 vs 上週 9 段\n- **任務切換**：本週更頻繁，可能影響效率\n\n"
-        }
-        (AppLocale::ZhTw, AssistantQuestionKind::Listing) => {
-            "\n【示例】\n使用者：列出所有完成的任務\n助手：\n## 清單\n- 修復登入頁面的樣式問題（4月25日）\n- 完成使用者權限模組的重構（4月26日）\n- 撰寫 API 介面文件（4月27日）\n- 部署測試環境並驗證（4月28日）\n\n"
-        }
-        (_, AssistantQuestionKind::TimeStat) => {
-            "\n【示例】\n用户：花了多少时间在编码上？\n助手：\n## 结论\n这段时间编码相关工作约占总时长的 45%，主要集中在代码审查和功能开发。\n## 时间分布\n- **代码审查**：2 小时 15 分钟，占 28%\n- **功能开发**：1 小时 30 分钟，占 19%\n- **文档编写**：45 分钟，占 10%\n\n"
-        }
-        (_, AssistantQuestionKind::Comparison) => {
-            "\n【示例】\n用户：和上周相比有什么变化？\n助手：\n## 结论\n本周总投入时间比上周增加约 20%，但深度工作时段减少了。\n## 对比分析\n- **总时长**：本周 25 小时 vs 上周 21 小时\n- **深度工作**：本周 6 段 vs 上周 9 段\n- **任务切换**：本周更频繁，可能影响效率\n\n"
-        }
-        (_, AssistantQuestionKind::Listing) => {
-            "\n【示例】\n用户：列出所有完成的任务\n助手：\n## 清单\n- 修复登录页面的样式问题（4月25日）\n- 完成用户权限模块的重构（4月26日）\n- 编写 API 接口文档（4月27日）\n- 部署测试环境并验证（4月28日）\n\n"
-        }
-        _ => "",
-    };
-    prompt.push_str(few_shot);
-
-    prompt.push_str(assistant_output_language_requirement(locale));
-
-    prompt
-}
-
 fn build_reference_line(item: &MemorySearchItem) -> String {
     let mut line = format!("- **{}**（{}）", item.title, item.date);
     if let Some(app) = &item.app_name {
@@ -1912,7 +1348,7 @@ fn build_summary_header(
 
     if let Some(review) = review {
         let total_hours = review.total_duration as f64 / 3600.0;
-        parts.push(format!("⏱ {:.1}h", total_hours));
+        parts.push(format!("⏱ {total_hours:.1}h"));
         parts.push(match locale {
             AppLocale::En => format!("active {} days", review.active_days),
             AppLocale::ZhTw => format!("活躍 {} 天", review.active_days),
@@ -1924,9 +1360,9 @@ fn build_summary_header(
         let count = intents.summary.len();
         if count > 0 {
             parts.push(match locale {
-                AppLocale::En => format!("🎯 {} intents", count),
-                AppLocale::ZhTw => format!("🎯 {} 個意圖", count),
-                AppLocale::ZhCn => format!("🎯 {} 个意图", count),
+                AppLocale::En => format!("🎯 {count} intents"),
+                AppLocale::ZhTw => format!("🎯 {count} 個意圖"),
+                AppLocale::ZhCn => format!("🎯 {count} 个意图"),
             });
         }
     }
@@ -2341,7 +1777,7 @@ fn build_fallback_assistant_answer(
                 AppLocale::ZhCn => "## 时间分布\n\n",
             });
             answer.push_str(&build_time_distribution(intents, locale));
-            answer.push_str("\n");
+            answer.push('\n');
         }
     }
 
@@ -3420,7 +2856,7 @@ fn collect_privacy_filters(state: &AppState) -> (Vec<String>, Vec<String>) {
     (ignored_apps, excluded_domains)
 }
 
-fn filter_activities_by_privacy(
+pub(crate) fn filter_activities_by_privacy(
     activities: Vec<Activity>,
     ignored_apps: &[String],
     excluded_domains: &[String],
@@ -3634,6 +3070,7 @@ pub async fn chat_work_assistant(
     locale: Option<String>,
     date_from: Option<String>,
     date_to: Option<String>,
+    on_event: tauri::ipc::Channel<crate::agent::StreamEvent>,
     state: State<'_, Arc<Mutex<AppState>>>,
 ) -> Result<AssistantAnswer, AppError> {
     let trimmed_question = question.trim().to_string();
@@ -3641,12 +3078,20 @@ pub async fn chat_work_assistant(
     let assistant_locale = AppLocale::from_option(locale.as_deref());
 
     if trimmed_question.is_empty() {
+        let answer = assistant_empty_question_message(assistant_locale).to_string();
+        let tool_labels = vec!["记忆检索".to_string()];
+        // 空问题也推一个 Done，保持事件流完整（前端可统一收尾）。
+        let _ = on_event.send(crate::agent::StreamEvent::Done {
+            answer: answer.clone(),
+            references: vec![],
+            tool_labels: tool_labels.clone(),
+        });
         return Ok(AssistantAnswer {
-            answer: assistant_empty_question_message(assistant_locale).to_string(),
+            answer,
             references: Vec::new(),
             used_ai: false,
             model_name: None,
-            tool_labels: vec!["记忆检索".to_string()],
+            tool_labels,
             cards: Vec::new(),
         });
     }
@@ -3663,11 +3108,24 @@ pub async fn chat_work_assistant(
         })
         .collect();
 
-    // 从 AppState 中 clone Database（Arc 引用计数 +1，可跨 await）
-    let database = {
+    // 从 AppState 中 clone Database + 收集隐私过滤器（Arc 引用计数 +1，可跨 await）
+    let (database, ignored_apps, excluded_domains) = {
         let s = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
-        s.database.clone()
+        let (ignored_apps, excluded_domains) = collect_privacy_filters(&s);
+        (s.database.clone(), ignored_apps, excluded_domains)
     };
+
+    // 流式桥接：agent 用 mpsc 推事件，这里转发到 Tauri ipc::Channel（前端 onmessage 收）。
+    // Channel::send 失败即前端已销毁，停止转发。
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::agent::StreamEvent>(64);
+    let on_event_clone = on_event.clone();
+    let bridge = tauri::async_runtime::spawn(async move {
+        while let Some(ev) = rx.recv().await {
+            if on_event_clone.send(ev).is_err() {
+                break;
+            }
+        }
+    });
 
     // Stage 6: 完整 Orchestrator 集成
     // 使用 locale 感知的系统提示词，确保繁体/英文用户得到对应语言的回答
@@ -3678,12 +3136,27 @@ pub async fn chat_work_assistant(
         &database,
         &agent_history,
         Some(system_prompt),
+        &ignored_apps,
+        &excluded_domains,
+        Some(tx),
     )
-    .await?;
+    .await;
+
+    // 等桥接任务把剩余事件发完（tx 在 handle 内 drop 后 rx.recv() 返回 None）。
+    let _ = bridge.await;
+
+    let result = match result {
+        Ok(r) => r,
+        Err(e) => {
+            let msg = e.to_string();
+            let _ = on_event.send(crate::agent::StreamEvent::Error(msg));
+            return Err(e);
+        }
+    };
 
     Ok(AssistantAnswer {
         answer: result.answer,
-        references: Vec::new(),
+        references: result.references,
         used_ai: result.used_ai,
         model_name: model_config.map(|c| c.model.clone()),
         tool_labels: result.tool_labels,
@@ -3855,9 +3328,9 @@ pub(crate) async fn generate_report_inner(
     };
 
     if let Some(avatar_state) = avatar_start_state.as_ref() {
-        crate::avatar_engine::emit_avatar_state(&app, avatar_state);
+        crate::avatar_engine::emit_avatar_state(app, avatar_state);
         crate::avatar_engine::emit_avatar_bubble(
-            &app,
+            app,
             &crate::avatar_engine::AvatarBubblePayload::info(match report_locale {
                 AppLocale::ZhCn => "开始整理日报，稍等我一下。",
                 AppLocale::ZhTw => "開始整理日報，稍等我一下。",
@@ -3955,7 +3428,7 @@ pub(crate) async fn generate_report_inner(
     };
 
     if let Some(avatar_state) = avatar_finish_state.as_ref() {
-        crate::avatar_engine::emit_avatar_state(&app, avatar_state);
+        crate::avatar_engine::emit_avatar_state(app, avatar_state);
         let bubble = if report_result.is_ok() {
             crate::avatar_engine::AvatarBubblePayload::success(match report_locale {
                 AppLocale::ZhCn => "日报整理好了，可以回来看看。",
@@ -3969,7 +3442,7 @@ pub(crate) async fn generate_report_inner(
                 AppLocale::En => "This report run failed. Please try again later.",
             })
         };
-        crate::avatar_engine::emit_avatar_bubble(&app, &bubble);
+        crate::avatar_engine::emit_avatar_bubble(app, &bubble);
     }
 
     let generated_report = report_result?;
@@ -3999,8 +3472,7 @@ pub(crate) async fn generate_report_inner(
         if let Some(export_dir) = config.daily_report_export_dir.as_deref() {
             if let Err(e) = export_daily_report_markdown(Path::new(export_dir), &date, &report) {
                 log::error!(
-                    "日报自动导出失败（日报已保存到数据库，仅导出文件失败）: {:?}",
-                    e
+                    "日报自动导出失败（日报已保存到数据库，仅导出文件失败）: {e:?}"
                 );
                 // Do NOT propagate the error — report is already saved in the database.
                 // Export failure should not make the entire generation appear to have failed.
@@ -5092,16 +4564,12 @@ async fn resolve_ollama_text_model_names(
             Err(error) => {
                 if ollama_model_should_be_listed(&model, None) {
                     log::debug!(
-                        "获取 Ollama 模型详情失败，回退名称规则后保留模型: model={}, error={}",
-                        model_name,
-                        error
+                        "获取 Ollama 模型详情失败，回退名称规则后保留模型: model={model_name}, error={error}"
                     );
                     filtered_names.push(model_name);
                 } else {
                     log::debug!(
-                        "获取 Ollama 模型详情失败，回退名称规则后排除模型: model={}, error={}",
-                        model_name,
-                        error
+                        "获取 Ollama 模型详情失败，回退名称规则后排除模型: model={model_name}, error={error}"
                     );
                 }
             }
@@ -5868,8 +5336,7 @@ fn ensure_target_dir_ready(target_dir: &Path) -> Result<bool, AppError> {
 
         if !is_managed_dir_entry(&name) {
             return Err(AppError::Config(format!(
-                "目标目录包含非 Work Review 数据（{}），为避免误覆盖，请选择空目录或旧的数据目录",
-                name
+                "目标目录包含非 Work Review 数据（{name}），为避免误覆盖，请选择空目录或旧的数据目录"
             )));
         }
 
@@ -6042,7 +5509,7 @@ pub async fn change_data_dir(
     state.data_dir = target_dir.clone();
     state.config_path = config_path;
 
-    log::info!("数据目录已切换到: {:?}", target_dir);
+    log::info!("数据目录已切换到: {target_dir:?}");
     drop(state);
     crate::emit_recording_state_changed(&app);
 
@@ -6105,11 +5572,10 @@ pub async fn cleanup_old_data_dir(
     let (removed_entries, preserved_entries) = remove_app_managed_entries(&cleanup_dir)?;
     let message = if preserved_entries.is_empty() {
         if cleanup_dir.exists() {
-            format!("已清理旧目录中的 {} 项 Work Review 数据", removed_entries)
+            format!("已清理旧目录中的 {removed_entries} 项 Work Review 数据")
         } else {
             format!(
-                "已清理旧目录中的 {} 项 Work Review 数据，并移除空目录",
-                removed_entries
+                "已清理旧目录中的 {removed_entries} 项 Work Review 数据，并移除空目录"
             )
         }
     } else {
@@ -6305,7 +5771,7 @@ pub async fn download_and_install_github_update(
                         format!("正在下载更新 {percent}%（{progress_source}）")
                     } else {
                         let mb = ((downloaded_bytes as f64) / 1024.0 / 1024.0).max(0.1);
-                        format!("正在下载更新 {:.1} MB（{}）", mb, progress_source)
+                        format!("正在下载更新 {mb:.1} MB（{progress_source}）")
                     };
 
                     emit_update_status(
@@ -6323,7 +5789,7 @@ pub async fn download_and_install_github_update(
                     emit_update_status(
                         &finish_app,
                         "installing",
-                        format!("下载完成，正在安装（{}）...", finish_source),
+                        format!("下载完成，正在安装（{finish_source}）..."),
                         Some(finish_source.clone()),
                         Some(finish_version.clone()),
                         None,
@@ -7161,7 +6627,7 @@ fn get_running_apps_impl() -> Result<Vec<String>, AppError> {
         let apps_str = String::from_utf8_lossy(&output.stdout);
         let mut apps: Vec<String> = apps_str
             .split(", ")
-            .map(|s| crate::monitor::normalize_display_app_name(s))
+            .map(crate::monitor::normalize_display_app_name)
             .filter(|s| !s.is_empty())
             .collect();
         apps.sort();
@@ -7471,14 +6937,14 @@ pub async fn open_permission_settings(permission: String) -> Result<(), AppError
         }
 
         let target = macos_permission_settings_url(&permission)
-            .ok_or_else(|| AppError::Unknown(format!("不支持的权限类型: {}", permission)))?;
+            .ok_or_else(|| AppError::Unknown(format!("不支持的权限类型: {permission}")))?;
 
         std::process::Command::new("open")
             .arg(target)
             .spawn()
             .map_err(|e| AppError::Unknown(format!("打开系统权限设置失败: {e}")))?;
 
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -7794,14 +7260,14 @@ fn score_normalized_macos_app_bundle_name(normalized_app: &str, normalized_bundl
     let mut score = 0;
     if normalized_app == normalized_bundle {
         score += 1000;
-    } else if normalized_app.contains(&normalized_bundle)
-        || normalized_bundle.contains(&normalized_app)
+    } else if normalized_app.contains(normalized_bundle)
+        || normalized_bundle.contains(normalized_app)
     {
         score += 500;
     }
 
-    let app_tokens = macos_significant_name_tokens(&normalized_app);
-    let bundle_tokens = macos_significant_name_tokens(&normalized_bundle);
+    let app_tokens = macos_significant_name_tokens(normalized_app);
+    let bundle_tokens = macos_significant_name_tokens(normalized_bundle);
     let overlap_count = bundle_tokens
         .iter()
         .filter(|token| app_tokens.iter().any(|candidate| candidate == *token))

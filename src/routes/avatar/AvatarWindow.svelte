@@ -306,7 +306,7 @@
       bubbleTimer = setTimeout(() => {
         bubbleSource = null;
         bubbleTimer = null;
-      }, payload?.durationMs ?? payload?.duration ?? 4200);
+      }, payload?.durationMs ?? 4200);
     }
   }
 

@@ -37,7 +37,6 @@ mod telegram_bot;
 mod wecom_bot;
 mod work_intelligence;
 
-use chrono;
 use config::{AppConfig, AvatarFollowupItem};
 use database::Database;
 use once_cell::sync::OnceCell;
@@ -831,7 +830,7 @@ fn migrate_legacy_data_dir(target_dir: &PathBuf) {
     if let Err(error) = copy_dir_contents(&legacy_dir, target_dir, false) {
         log::warn!("迁移旧版数据目录失败: {error}");
     } else {
-        log::info!("已将旧版数据目录迁移到稳定目录: {:?}", target_dir);
+        log::info!("已将旧版数据目录迁移到稳定目录: {target_dir:?}");
     }
 }
 
@@ -1471,8 +1470,8 @@ async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
 
         let avatar_state = avatar_engine::apply_avatar_visual_settings(
             avatar_engine::derive_avatar_state_with_rules(
-                &app_category_rules,
-                &app_custom_categories,
+                app_category_rules,
+                app_custom_categories,
                 &active_window.app_name,
                 &active_window.window_title,
                 active_window.browser_url.as_deref(),
@@ -1577,6 +1576,7 @@ async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
                     &persona,
                     &manual_followups,
                     now_ts,
+                    now_ms,
                 ) {
                     if crate::avatar_followup::should_emit_followup(&payload.project_key, now_ms) {
                         crate::avatar_followup::emit_followup_suggestion(&app, &payload);
@@ -3082,11 +3082,11 @@ async fn main() {
                     lifecycle_state.suppress_next_exit = true;
                 }
             } else if let tauri::WindowEvent::Destroyed = event {
-                sync_effective_dock_visibility(&window.app_handle());
+                sync_effective_dock_visibility(window.app_handle());
             }
         })
         .setup(|app| {
-            if let Err(e) = autostart::init_autostart(&app.handle()) {
+            if let Err(e) = autostart::init_autostart(app.handle()) {
                 log::warn!("初始化开机自启功能失败: {e}");
             }
 
@@ -3140,7 +3140,7 @@ async fn main() {
             };
 
             if let Err(e) = avatar_engine::sync_avatar_window(
-                &app.handle(),
+                app.handle(),
                 avatar_enabled,
                 avatar_scale,
                 avatar_position,
@@ -3148,13 +3148,13 @@ async fn main() {
             ) {
                 log::warn!("初始化桌宠窗口失败: {e}");
             } else if avatar_enabled {
-                avatar_engine::emit_avatar_state(&app.handle(), &avatar_state);
+                avatar_engine::emit_avatar_state(app.handle(), &avatar_state);
             }
 
-            avatar_input::start_avatar_input_monitor(&app.handle());
+            avatar_input::start_avatar_input_monitor(app.handle());
             avatar_input::spawn_avatar_input_bridge(app.handle().clone());
 
-            if let Err(e) = localhost_api::sync_localhost_api_runtime(&app.handle(), state.inner())
+            if let Err(e) = localhost_api::sync_localhost_api_runtime(app.handle(), state.inner())
             {
                 log::warn!("初始化本地 API 失败: {e}");
             }
@@ -3193,7 +3193,7 @@ async fn main() {
                 lightweight_mode: lightweight_mode.clone(),
                 avatar_toggle: avatar_toggle.clone(),
             });
-            refresh_tray_menu(&app.handle());
+            refresh_tray_menu(app.handle());
 
             let tray_icon = build_tray_icon(app);
             let tray_builder = TrayIconBuilder::new().icon(tray_icon).menu(&menu);
@@ -3240,7 +3240,7 @@ async fn main() {
                                 }
                             }
                         }
-                        emit_recording_state_changed(&app);
+                        emit_recording_state_changed(app);
                     }
                     TRAY_MENU_LIGHTWEIGHT_MODE_ID => {
                         let next_config = {
@@ -3254,7 +3254,7 @@ async fn main() {
                             commands::persist_app_config(next_config, app.clone(), &state_for_tray)
                         {
                             log::warn!("从托盘切换轻量模式失败: {e}");
-                            refresh_tray_menu(&app);
+                            refresh_tray_menu(app);
                         }
                     }
                     TRAY_MENU_AVATAR_TOGGLE_ID => {
@@ -3269,7 +3269,7 @@ async fn main() {
                             commands::persist_app_config(next_config, app.clone(), &state_for_tray)
                         {
                             log::warn!("从托盘切换桌宠失败: {e}");
-                            refresh_tray_menu(&app);
+                            refresh_tray_menu(app);
                         }
                     }
                     _ => {}
@@ -3283,7 +3283,7 @@ async fn main() {
                     } = event
                     {
                         let app_handle = _tray.app_handle();
-                        if let Err(e) = reveal_main_window(&app_handle, None) {
+                        if let Err(e) = reveal_main_window(app_handle, None) {
                             log::warn!("点击托盘恢复主窗口失败: {e}");
                         }
                     }
@@ -3327,7 +3327,7 @@ async fn main() {
                 // decorations 配置由 tauri.conf.json 控制，用户可通过设置中的开关动态修改
             }
 
-            sync_effective_dock_visibility(&app.handle());
+            sync_effective_dock_visibility(app.handle());
 
             // 保存 AppHandle 到全局变量，用于从 macOS Dock 点击恢复窗口
             let _ = APP_HANDLE.set(app.handle().clone());
@@ -3452,7 +3452,6 @@ async fn main() {
                     if should_prevent {
                         log::info!("拦截最后一个主窗口关闭导致的退出，保留后台与托盘");
                         api.prevent_exit();
-                        return;
                     }
                 }
             }

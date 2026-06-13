@@ -373,7 +373,7 @@ async fn chat_gemini(
         .api_key
         .as_deref()
         .ok_or_else(|| AppError::Analysis("Gemini 需要 API Key，请在设置中配置".to_string()))?;
-    let url = format!("{endpoint}/models/{}:generateContent?key={api_key}", model_config.model);
+    let url = format!("{endpoint}/models/{}:generateContent", model_config.model);
 
     // Gemini 格式：contents + systemInstruction + tools
     let mut contents = vec![];
@@ -462,11 +462,17 @@ async fn chat_gemini(
         body["tools"] = json!([{"function_declarations": gemini_tools}]);
     }
 
-    let response = client.post(&url).json(&body).send().await?;
+    let response = client
+        .post(&url)
+        .header("x-goog-api-key", api_key)
+        .json(&body)
+        .send()
+        .await?;
     if !response.status().is_success() {
         let error_text = response.text().await.unwrap_or_default();
         return Err(AppError::Analysis(format!(
-            "Gemini 调用失败: {error_text}"
+            "Gemini 调用失败: {}",
+            error_text.chars().take(300).collect::<String>()
         )));
     }
 

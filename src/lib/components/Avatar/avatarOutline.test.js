@@ -115,12 +115,12 @@ test('状态气泡应采用贴头短气泡，减少白卡感和视觉侵入', ()
   const windowSource = readFileSync(new URL('../../../routes/avatar/AvatarWindow.svelte', import.meta.url), 'utf8');
 
   assert.doesNotMatch(source, /Array\.from\(bubble\.message\.replace\(\/\\s\+\/g, ''\)\)/);
-  assert.match(source, /class="avatar-popover-anchor absolute right-\[8%\] top-\[8px\]"/);
+  assert.match(source, /class="avatar-popover-anchor absolute right-\[6%\] top-\[8px\]"/);
   assert.doesNotMatch(source, /writing-mode: vertical-rl/);
   assert.match(source, /compactBubbleMessage/);
   assert.match(source, /bubblePanelStyle = compactBubbleMessage/);
-  assert.match(source, /width: fit-content; min-width: 120px; max-width: min\(68vw, 196px\);/);
-  assert.match(source, /width: min\(88vw, 336px\); min-width: 180px; max-width: min\(88vw, 336px\);/);
+  assert.match(source, /width: fit-content; min-width: 120px; max-width: min\(82vw, 196px\);/);
+  assert.match(source, /width: min\(82vw, 336px\); min-width: 160px; max-width: min\(82vw, 336px\);/);
   assert.match(source, /min-height: 40px/);
   assert.match(source, /padding: 6px 14px 7px 14px/);
   assert.match(source, /display: block;/);

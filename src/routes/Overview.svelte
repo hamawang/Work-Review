@@ -777,10 +777,13 @@
       {/each}
     {:else}
       <StatsCard title={overviewTotalActivityTitle} value={formatDuration(stats.total_duration)} icon="duration" color="indigo" />
-      <StatsCard title={overviewWorkDurationTitle} value={formatDuration(stats.work_time_duration || 0)} icon="focus" color="emerald" />
-      {#if stats.overtime_duration > 0}
-        <StatsCard title={t('overview.overtime')} value={formatDuration(stats.overtime_duration)} icon="overtime" color="rose" />
-      {/if}
+      <StatsCard
+        title={overviewWorkDurationTitle}
+        value={formatDuration(stats.work_time_duration || 0)}
+        icon="focus"
+        color="emerald"
+        subtitle={stats.overtime_duration > 0 ? t('overview.overtimeBadge', { dur: formatDuration(stats.overtime_duration) }) : null}
+      />
       <StatsCard title={t('overview.browser')} value={formatDuration(stats.browser_duration)} icon="browser" color="blue" />
       <StatsCard title={t('overview.apps')} value={stats.app_usage.length} icon="apps" color="amber" />
     {/if}

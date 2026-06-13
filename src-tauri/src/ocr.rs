@@ -289,15 +289,29 @@ if __name__ == "__main__":
         let mut child = command
             .spawn()
             .map_err(|e| AppError::Unknown(format!("{context} 启动失败: {e}")))?;
-        let started_at = Instant::now();
 
-        loop {
+        // 起线程持续排空 stdout/stderr 管道，避免子进程因管道缓冲（默认 64KB）写满
+        // 而阻塞在写操作上——否则 try_wait 会一直返回 None 直到超时，OCR 对大图/密集
+        // 文本输出（常见）会必现超时失败、丢掉全部结果。
+        let stdout_handle = child.stdout.take().map(|mut s| {
+            thread::spawn(move || {
+                let mut buf = Vec::new();
+                let _ = std::io::Read::read_to_end(&mut s, &mut buf);
+                buf
+            })
+        });
+        let stderr_handle = child.stderr.take().map(|mut s| {
+            thread::spawn(move || {
+                let mut buf = Vec::new();
+                let _ = std::io::Read::read_to_end(&mut s, &mut buf);
+                buf
+            })
+        });
+
+        let started_at = Instant::now();
+        let status = loop {
             match child.try_wait() {
-                Ok(Some(_)) => {
-                    return child
-                        .wait_with_output()
-                        .map_err(|e| AppError::Unknown(format!("{context} 读取输出失败: {e}")));
-                }
+                Ok(Some(status)) => break status,
                 Ok(None) if started_at.elapsed() < OCR_COMMAND_TIMEOUT => {
                     thread::sleep(Duration::from_millis(100));
                 }
@@ -315,7 +329,12 @@ if __name__ == "__main__":
                     return Err(AppError::Unknown(format!("{context} 等待进程失败: {e}")));
                 }
             }
-        }
+        };
+
+        // 子进程已退出（或被 kill 后管道关闭），读线程结束，join 取回输出。
+        let stdout = stdout_handle.and_then(|h| h.join().ok()).unwrap_or_default();
+        let stderr = stderr_handle.and_then(|h| h.join().ok()).unwrap_or_default();
+        Ok(Output { status, stdout, stderr })
     }
 
     /// 获取 Python 路径（优先使用 work_review conda 环境）
@@ -1059,7 +1078,10 @@ fn ensure_paddle_worker<'a>(
 
 fn parse_paddle_response_line(line: &str) -> Result<Option<OcrResult>> {
     let value: serde_json::Value = serde_json::from_str(line).map_err(|e| {
-        AppError::Unknown(format!("无法解析 PaddleOCR 输出: {e}; 原始输出: {line}"))
+        AppError::Unknown(format!(
+            "无法解析 PaddleOCR 输出: {e}; 行长度: {} 字节",
+            line.len()
+        ))
     })?;
 
     if let Some(error) = value.get("error").and_then(|v| v.as_str()) {
@@ -1383,8 +1405,8 @@ pub fn clean_ocr_text(text: &str) -> String {
     for line in text.lines() {
         let cleaned = clean_line(line);
 
-        // 跳过空行或太短的行（可能是乱码）
-        if cleaned.len() < 2 {
+        // 跳过空行或太短的行（可能是乱码）。按字符数判断，避免单字中文（3 字节）漏过。
+        if cleaned.chars().count() < 2 {
             continue;
         }
 
@@ -1420,18 +1442,30 @@ fn clean_line(line: &str) -> String {
     result.trim().to_string()
 }
 
-/// 判断字符是否有效（中英文、数字、常用标点）
+/// 判断字符是否有效（中英文、数字、常用标点、代码/URL 符号、日韩文）
 fn is_valid_char(c: char) -> bool {
-    // 中文字符
-    if ('\u{4e00}'..='\u{9fff}').contains(&c) {
+    // CJK 中文（基本区 + 扩展 A）
+    if ('\u{4e00}'..='\u{9fff}').contains(&c) || ('\u{3400}'..='\u{4dbf}').contains(&c) {
         return true;
     }
-    // 英文字母
-    if c.is_ascii_alphabetic() {
+    // 日文假名（平假名 / 片假名）
+    if ('\u{3040}'..='\u{30ff}').contains(&c) {
         return true;
     }
-    // 数字
-    if c.is_ascii_digit() {
+    // 韩文音节
+    if ('\u{ac00}'..='\u{d7af}').contains(&c) {
+        return true;
+    }
+    // 英文字母、数字
+    if c.is_ascii_alphanumeric() {
+        return true;
+    }
+    // 代码 / URL / 文件路径常用符号：OCR 屏幕上的代码、终端、URL 不应被这些符号破坏
+    if matches!(
+        c,
+        '/' | '\\' | '*' | '+' | '=' | '<' | '>' | '#' | '@' | '$' | '%' | '^' | '&'
+            | '|' | '`' | '~' | '{' | '}' | '[' | ']' | '_' | '-'
+    ) {
         return true;
     }
     // 常用标点（中英文）
@@ -1440,11 +1474,7 @@ fn is_valid_char(c: char) -> bool {
         '（', '）', '【', '】', '「', '」', '《', '》', '-', '—', '·', '.', ',', ':', ';', '!',
         '?', '(', ')',
     ];
-    if punctuation.contains(&c) {
-        return true;
-    }
-
-    false
+    punctuation.contains(&c)
 }
 
 /// 过滤敏感信息

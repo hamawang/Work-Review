@@ -1184,8 +1184,14 @@ impl Database {
         let mut total_duration: i64 = 0;
         let mut work_time_duration: i64 = 0;
         let mut after_hours_duration: i64 = 0;
-        // 最后一个工作时段的结束时间戳，用于计算下班后加班时长
-        let last_segment_end_ts = segment_ts.iter().map(|&(_, we)| we).max().unwrap_or(end_ts);
+        // 最后一个工作时段的结束时间戳，用于计算下班后加班时长。
+        // 跨午夜段（如 22:00→次日06:00）的 we 会小于 ws，若直接取 max 会得到清晨时刻，
+        // 导致班内活动被误判为"下班后加班"。对这类段的结束时间按次日（+86400）参与比较。
+        let last_segment_end_ts = segment_ts
+            .iter()
+            .map(|&(ws, we)| if we < ws { we + 86400 } else { we })
+            .max()
+            .unwrap_or(end_ts);
         let mut app_usage_map: std::collections::HashMap<
             String,
             (i64, i64, Option<String>, Option<String>, i64),

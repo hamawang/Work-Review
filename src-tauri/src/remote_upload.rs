@@ -44,7 +44,7 @@ async fn upload_s3(
         .host_str()
         .ok_or_else(|| AppError::Config("S3 endpoint 缺少 host".into()))?;
     let host_with_port = if let Some(port) = parsed.port() {
-        format!("{}:{}", host, port)
+        format!("{host}:{port}")
     } else {
         host.to_string()
     };
@@ -63,14 +63,12 @@ async fn upload_s3(
     let canonical_querystring = "";
 
     let canonical_headers = format!(
-        "content-type:image/jpeg\nhost:{}\nx-amz-content-sha256:{}\nx-amz-date:{}\n",
-        host_with_port, payload_hash, amz_date
+        "content-type:image/jpeg\nhost:{host_with_port}\nx-amz-content-sha256:{payload_hash}\nx-amz-date:{amz_date}\n"
     );
     let signed_headers = "content-type;host;x-amz-content-sha256;x-amz-date";
 
     let canonical_request = format!(
-        "PUT\n{}\n{}\n{}\n{}\n{}",
-        canonical_uri, canonical_querystring, canonical_headers, signed_headers, payload_hash
+        "PUT\n{canonical_uri}\n{canonical_querystring}\n{canonical_headers}\n{signed_headers}\n{payload_hash}"
     );
 
     let credential_scope = format!("{}/{}/s3/aws4_request", date_stamp, config.region);
@@ -118,7 +116,7 @@ async fn upload_s3(
 
 fn derive_signing_key(secret_key: &str, date_stamp: &str, region: &str, service: &str) -> Vec<u8> {
     let k_date = hmac_sha256(
-        format!("AWS4{}", secret_key).as_bytes(),
+        format!("AWS4{secret_key}").as_bytes(),
         date_stamp.as_bytes(),
     );
     let k_region = hmac_sha256(&k_date, region.as_bytes());
@@ -143,7 +141,7 @@ fn url_encode_path(path: &str) -> String {
                     {
                         String::from(b as char)
                     } else {
-                        format!("%{:02X}", b)
+                        format!("%{b:02X}")
                     }
                 })
                 .collect::<String>()
@@ -223,7 +221,7 @@ async fn ensure_webdav_directories(
         {
             Ok(r) if r.status().is_success() || r.status().as_u16() == 405 => {}
             Ok(r) => log::debug!("MKCOL {} 返回 {}", mkcol_url, r.status()),
-            Err(e) => log::debug!("MKCOL {} 失败: {}", mkcol_url, e),
+            Err(e) => log::debug!("MKCOL {mkcol_url} 失败: {e}"),
         }
     }
     Ok(())
@@ -235,7 +233,7 @@ fn remote_object_path(prefix: &str, relative_path: &str) -> String {
     if prefix.is_empty() {
         relative_path
     } else {
-        format!("{}/{}", prefix, relative_path)
+        format!("{prefix}/{relative_path}")
     }
 }
 

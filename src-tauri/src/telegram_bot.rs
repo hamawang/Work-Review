@@ -138,7 +138,7 @@ pub fn sync_telegram_bot_runtime(state: &Arc<Mutex<AppState>>) -> Result<(), App
         return Ok(());
     }
 
-    if bot_token.is_none() || bot_token.as_ref().map_or(true, |t| t.trim().is_empty()) {
+    if bot_token.is_none() || bot_token.as_ref().is_none_or(|t| t.trim().is_empty()) {
         s.telegram_bot_runtime.stop();
         if let Ok(mut st) = s.telegram_bot_runtime.shared.lock() {
             st.last_error = Some("Bot Token 未填写".to_string());
@@ -274,17 +274,12 @@ async fn run(
                             if should_abort_polling(status, body.error_code, consecutive_errors) {
                                 set_error(shared, msg.clone());
                                 log::error!(
-                                    "Telegram Bot 连续 {} 次轮询异常，停止轮询: {}",
-                                    consecutive_errors,
-                                    msg
+                                    "Telegram Bot 连续 {consecutive_errors} 次轮询异常，停止轮询: {msg}"
                                 );
                                 return;
                             }
                             log::warn!(
-                                "Telegram Bot 轮询异常(第{}次): {}，{}秒后重试",
-                                consecutive_errors,
-                                msg,
-                                TELEGRAM_POLL_RETRY_SECONDS
+                                "Telegram Bot 轮询异常(第{consecutive_errors}次): {msg}，{TELEGRAM_POLL_RETRY_SECONDS}秒后重试"
                             );
                             tokio::time::sleep(std::time::Duration::from_secs(
                                 TELEGRAM_POLL_RETRY_SECONDS,

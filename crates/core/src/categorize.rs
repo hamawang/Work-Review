@@ -661,6 +661,7 @@ pub fn categorize_app(app_name: &str, window_title: &str) -> String {
         || app_lower.contains("qq浏览器")
         || app_lower.contains("360浏览器")
         || app_lower.contains("搜狗浏览器")
+        || app_lower.contains("tabbit")
     {
         return "browser".to_string();
     }
