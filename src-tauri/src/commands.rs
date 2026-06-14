@@ -203,6 +203,15 @@ pub struct UpdateSettings {
     pub check_interval_hours: u64,
 }
 
+/// 周视图热力图的单日行：日期 + 星期几(0=周一) + 24 小时时长。
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct DailyHourly {
+    pub date: String,
+    pub weekday: i32,
+    pub hourly: Vec<i64>,
+}
+
 #[derive(Deserialize, Debug)]
 struct GithubReleaseResponse {
     tag_name: String,
@@ -2386,6 +2395,48 @@ fn overview_week_bounds_for_date(anchor: chrono::NaiveDate) -> (String, String) 
         monday.format("%Y-%m-%d").to_string(),
         anchor.format("%Y-%m-%d").to_string(),
     )
+}
+
+/// 滚动 7 天窗口（anchor-6 .. anchor），用于周视图热力图（保证满 7 格）。
+fn rolling_week_bounds(anchor: chrono::NaiveDate) -> (chrono::NaiveDate, chrono::NaiveDate) {
+    (anchor - chrono::Duration::days(6), anchor)
+}
+
+/// 周视图热力图：返回最近 7 天（滚动窗口）的每小时活跃时长矩阵（7 × 24）。
+/// 复用 load_daily_stats_for_overview，与现有周 hourly 口径一致（隐私过滤不触碰 hourly）。
+#[tauri::command]
+pub async fn get_weekly_hourly_heatmap(
+    date: Option<String>,
+    state: State<'_, Arc<Mutex<AppState>>>,
+) -> Result<Vec<DailyHourly>, AppError> {
+    use chrono::Datelike;
+    let today = chrono::Local::now().date_naive();
+    let anchor = date
+        .as_deref()
+        .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+        .unwrap_or(today);
+    let (start, end) = rolling_week_bounds(anchor);
+    let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
+    let mut out: Vec<DailyHourly> = Vec::new();
+    let mut cur = start;
+    while cur <= end {
+        let date_str = cur.format("%Y-%m-%d").to_string();
+        let weekday = cur.weekday().num_days_from_monday() as i32;
+        let stats = load_daily_stats_for_overview(&state, &date_str)?;
+        let mut hourly = vec![0i64; 24];
+        for bucket in stats.hourly_activity_distribution {
+            if (0..24).contains(&bucket.hour) {
+                hourly[bucket.hour as usize] += bucket.duration;
+            }
+        }
+        out.push(DailyHourly {
+            date: date_str,
+            weekday,
+            hourly,
+        });
+        cur += chrono::Duration::days(1);
+    }
+    Ok(out)
 }
 
 #[derive(Default)]
@@ -8026,6 +8077,7 @@ mod tests {
         normalize_saved_report_ai_mode, ollama_model_names_match, ollama_model_should_be_listed,
         ollama_show_response_supports_completion, openai_compatible_chat_completion_urls,
         openai_connection_test_max_tokens, overview_week_bounds_for_date, parse_ollama_model_names,
+        rolling_week_bounds,
         resolve_saved_report_metadata, sum_daily_stats, AppLocale, AssistantChatMessage,
         AssistantQuestionKind, AssistantReasoningMode, UPDATER_JSON_ENDPOINTS,
         UPDATE_CONNECT_TIMEOUT_SECS, UPDATE_REQUEST_TIMEOUT_SECS,
@@ -8040,6 +8092,14 @@ mod tests {
     };
     use chrono::NaiveDate;
     use std::path::{Path, PathBuf};
+
+    #[test]
+    fn rolling_week_bounds_returns_seven_day_window() {
+        let anchor = NaiveDate::from_ymd_opt(2026, 6, 14).unwrap();
+        let (start, end) = rolling_week_bounds(anchor);
+        assert_eq!(end, anchor);
+        assert_eq!(start, NaiveDate::from_ymd_opt(2026, 6, 8).unwrap());
+    }
 
     fn sample_review() -> WeeklyReviewResult {
         WeeklyReviewResult {

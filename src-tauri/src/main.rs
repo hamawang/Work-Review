@@ -3345,6 +3345,7 @@ async fn main() {
             commands::get_today_stats,
             commands::get_overview_stats,
             commands::get_daily_stats,
+            commands::get_weekly_hourly_heatmap,
             commands::get_timeline,
             commands::get_hourly_app_breakdown,
             commands::generate_report,

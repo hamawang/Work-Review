@@ -140,6 +140,14 @@ export default {
       distributionSubtitle: 'Peak activity is around {hour}, totaling {duration}',
       distributionSubtitleRange: 'Across the selected date range, the {hour} bucket totals {duration}',
       topHour: 'TOP {index} · {hour}',
+      heatmap: {
+        titleWeek: 'Hourly Activity Heatmap',
+        subtitleWeek: 'Last 7 days (rolling window)',
+        less: 'Less',
+        more: 'More',
+        weekdayMon: 'Mon', weekdayTue: 'Tue', weekdayWed: 'Wed', weekdayThu: 'Thu',
+        weekdayFri: 'Fri', weekdaySat: 'Sat', weekdaySun: 'Sun',
+      },
     },
     timeline: {
       title: 'Timeline',

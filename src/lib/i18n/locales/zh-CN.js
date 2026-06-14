@@ -140,6 +140,14 @@ export default {
       distributionSubtitle: '高峰集中在 {hour}，该小时累计 {duration}',
       distributionSubtitleRange: '在所选日期段内，{hour} 这个小时累计 {duration}',
       topHour: 'TOP {index} · {hour}',
+      heatmap: {
+        titleWeek: '每小时活跃度热力图',
+        subtitleWeek: '最近 7 天（滚动窗口）',
+        less: '少',
+        more: '多',
+        weekdayMon: '周一', weekdayTue: '周二', weekdayWed: '周三', weekdayThu: '周四',
+        weekdayFri: '周五', weekdaySat: '周六', weekdaySun: '周日',
+      },
     },
     timeline: {
       title: '时间线',

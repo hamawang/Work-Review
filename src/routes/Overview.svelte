@@ -5,6 +5,7 @@
   import StatsCard from '../lib/components/StatsCard.svelte';
   import AppUsageChart from '../lib/components/AppUsageChart.svelte';
   import ActivityHourlyChart from '../lib/components/ActivityHourlyChart.svelte';
+  import HourlyHeatmap from '../lib/components/HourlyHeatmap.svelte';
   import { cache } from '../lib/stores/cache.js';
   import { confirm } from '../lib/stores/confirm.js';
   import { showToast } from '../lib/stores/toast.js';
@@ -144,6 +145,20 @@
     acc[bucket.hour] = Object.entries(cats).map(([category, duration]) => ({ category, duration }));
     return acc;
   }, {});
+  // 周视图热力图（7×24 矩阵）
+  let weeklyHeatmap = [];
+  async function loadWeeklyHeatmap() {
+    if (overviewMode !== 'week') {
+      weeklyHeatmap = [];
+      return;
+    }
+    try {
+      weeklyHeatmap = await invoke('get_weekly_hourly_heatmap', {});
+    } catch (e) {
+      weeklyHeatmap = [];
+    }
+  }
+  $: { overviewMode; loadWeeklyHeatmap(); }
   let overviewViewModeReady = false;
   let overviewDateInputFrom = formatOverviewDateInput(selectedDateFrom);
   let overviewDateInputTo = formatOverviewDateInput(selectedDateTo);
@@ -932,6 +947,7 @@
     <section class="page-card overview-section-card overview-panel overview-panel-subtle">
       <div class="mb-3 flex items-center justify-between gap-3">
         <h3 class="page-section-title !mb-0">{t('overview.hourlyActivity')}</h3>
+        {#if overviewMode !== 'week'}
         <button
           type="button"
           class="page-control-btn-icon"
@@ -950,6 +966,7 @@
             </svg>
           {/if}
         </button>
+        {/if}
       </div>
       {#if loading || !stats}
         <div class="animate-pulse">
@@ -975,6 +992,8 @@
             </div>
           </div>
         </div>
+      {:else if overviewMode === 'week'}
+        <HourlyHeatmap data={weeklyHeatmap} embedded />
       {:else}
         <ActivityHourlyChart
           embedded
