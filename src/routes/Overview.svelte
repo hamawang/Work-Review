@@ -116,7 +116,6 @@
   let appUsageViewMode = 'row';
   let hourlyActivityViewMode = 'column';
   // #104: 按分类着色的柱状图（堆叠）
-  let hourlyColorMode = 'plain'; // 'plain'（蓝灰总时长）| 'category'（分类彩色堆叠）
   let hourlyAppBreakdown = [];
   let categoryList = [];
   async function loadHourlyBreakdown() {
@@ -929,7 +928,6 @@
     <section class="page-card overview-section-card overview-panel overview-panel-subtle">
       <div class="mb-3 flex items-center justify-between gap-3">
         <h3 class="page-section-title !mb-0">{t('overview.hourlyActivity')}</h3>
-        <div class="flex items-center gap-1">
         <button
           type="button"
           class="page-control-btn-icon"
@@ -948,31 +946,6 @@
             </svg>
           {/if}
         </button>
-        <button
-          type="button"
-          class="page-control-btn-icon"
-          title={t('overview.hourlyColorMode')}
-          aria-pressed={hourlyColorMode === 'category'}
-          on:click={() => {
-            hourlyColorMode = hourlyColorMode === 'plain' ? 'category' : 'plain';
-          }}
-        >
-          {#if hourlyColorMode === 'category'}
-            <svg class="h-4 w-4" viewBox="0 0 24 24">
-              <rect x="4.5" y="11" width="3.5" height="9" rx="1" fill="#3B82F6" />
-              <rect x="4.5" y="6" width="3.5" height="5" rx="1" fill="#22C55E" />
-              <rect x="10.25" y="9" width="3.5" height="11" rx="1" fill="#EAB308" />
-              <rect x="16" y="13" width="3.5" height="7" rx="1" fill="#EC4899" />
-            </svg>
-          {:else}
-            <svg class="h-4 w-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <rect x="4.5" y="8" width="3.5" height="12" rx="1" stroke-width="1.8" />
-              <rect x="10.25" y="4" width="3.5" height="16" rx="1" stroke-width="1.8" />
-              <rect x="16" y="11" width="3.5" height="9" rx="1" stroke-width="1.8" />
-            </svg>
-          {/if}
-        </button>
-        </div>
       </div>
       {#if loading || !stats}
         <div class="animate-pulse">
@@ -1007,7 +980,6 @@
           distributionTitle={hourlyChartDistributionTitle}
           distributionSubtitleKey={hourlyChartDistributionSubtitleKey}
           mode={hourlyActivityViewMode}
-          categoryMode={hourlyColorMode === 'category'}
           categoryBreakdown={hourlyCategoryBreakdown}
           categoryColors={hourlyCategoryColors}
         />

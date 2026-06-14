@@ -9,7 +9,7 @@
   export let peakDurationLabel = '';
   export let embedded = false;
   // 按分类着色（堆叠柱）：categoryMode 开启时，每根柱按应用分类分段着色
-  export let categoryMode = false;
+  export let categoryMode = true;
   // { [hour]: [{ category, duration }, ...] }，由 Overview 从 hourly_app_breakdown 聚合
   export let categoryBreakdown = null;
   // { [category]: '#RRGGBB' }，来自 custom_categories
