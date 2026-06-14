@@ -131,6 +131,10 @@
     acc[c.key] = c.color;
     return acc;
   }, {});
+  $: hourlyCategoryNames = categoryList.reduce((acc, c) => {
+    acc[c.key] = c.name;
+    return acc;
+  }, {});
   $: hourlyCategoryBreakdown = hourlyAppBreakdown.reduce((acc, bucket) => {
     const cats = {};
     for (const app of bucket.apps || []) {
@@ -982,6 +986,7 @@
           mode={hourlyActivityViewMode}
           categoryBreakdown={hourlyCategoryBreakdown}
           categoryColors={hourlyCategoryColors}
+          categoryNames={hourlyCategoryNames}
         />
       {/if}
     </section>

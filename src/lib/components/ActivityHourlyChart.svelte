@@ -14,6 +14,8 @@
   export let categoryBreakdown = null;
   // { [category]: '#RRGGBB' }，来自 custom_categories
   export let categoryColors = null;
+  // { [category]: '分类名' }，用于图例
+  export let categoryNames = null;
 
   const keyHours = [0, 6, 12, 18, 23];
   let selectedHour = null;
@@ -74,6 +76,19 @@
   $: maxDuration = Math.max(1, ...buckets.map((bucket) => bucket.duration || 0));
   $: activeBuckets = buckets.filter((bucket) => bucket.duration > 0);
   $: totalDuration = buckets.reduce((sum, bucket) => sum + (bucket.duration || 0), 0);
+  // 图例：从 categoryBreakdown 聚合出当前用到的分类（按时长降序）
+  $: usedCategories = (() => {
+    if (!categoryBreakdown) return [];
+    const totals = {};
+    for (const hour in categoryBreakdown) {
+      for (const seg of categoryBreakdown[hour] || []) {
+        totals[seg.category] = (totals[seg.category] || 0) + seg.duration;
+      }
+    }
+    return Object.entries(totals)
+      .sort((a, b) => b[1] - a[1])
+      .map(([category, duration]) => ({ category, duration }));
+  })();
   $: peakBucket = buckets.reduce(
     (peak, bucket) => (bucket.duration > peak.duration ? bucket : peak),
     buckets[0] || { hour: 0, duration: 0 }
@@ -151,6 +166,16 @@
         </div>
       {/if}
     </div>
+    {#if usedCategories.length}
+      <div class="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+        {#each usedCategories as cat}
+          <span class="inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+            <span class="inline-block h-2.5 w-2.5 rounded-[3px]" style={`background: ${(categoryColors && categoryColors[cat.category]) || '#94a3b8'};`}></span>
+            {(categoryNames && categoryNames[cat.category]) || cat.category}
+          </span>
+        {/each}
+      </div>
+    {/if}
 
     {#if mode === 'row'}
       <div class="space-y-2 rounded-2xl bg-slate-50 p-3 dark:bg-slate-900/40">
