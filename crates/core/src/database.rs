@@ -149,6 +149,9 @@ pub struct HourlyAppBucket {
 pub struct AppDuration {
     pub app_name: String,
     pub duration: i64,
+    /// 应用分类 key（development/browser/communication...），用于按分类着色
+    #[serde(default)]
+    pub category: String,
     /// 该小时内该应用最近一次远程截图 URL（上传成功后填充）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub screenshot_url: Option<String>,
@@ -1672,6 +1675,7 @@ impl Database {
             "SELECT
                 CAST((timestamp - ?1) / 3600 AS INTEGER) as hour,
                 app_name,
+                MIN(category) as category,
                 SUM(duration) as total_duration,
                 (
                     SELECT latest.screenshot_url
@@ -1691,9 +1695,15 @@ impl Database {
              ORDER BY hour, total_duration DESC",
         )?;
 
-        let raw: Vec<(i32, String, i64, Option<String>)> = stmt
+        let raw: Vec<(i32, String, String, i64, Option<String>)> = stmt
             .query_map(params![start_ts, end_ts], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
             })?
             .filter_map(|r| r.ok())
             .collect();
@@ -1707,11 +1717,12 @@ impl Database {
             })
             .collect();
 
-        for (hour, app_name, duration, screenshot_url) in raw {
+        for (hour, app_name, category, duration, screenshot_url) in raw {
             if let Some(bucket) = buckets.get_mut(hour as usize) {
                 bucket.total_duration += duration;
                 bucket.apps.push(AppDuration {
                     app_name,
+                    category,
                     duration,
                     screenshot_url,
                 });

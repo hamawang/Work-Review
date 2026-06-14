@@ -8,6 +8,12 @@
   export let peakHourLabel = '';
   export let peakDurationLabel = '';
   export let embedded = false;
+  // 按分类着色（堆叠柱）：categoryMode 开启时，每根柱按应用分类分段着色
+  export let categoryMode = false;
+  // { [hour]: [{ category, duration }, ...] }，由 Overview 从 hourly_app_breakdown 聚合
+  export let categoryBreakdown = null;
+  // { [category]: '#RRGGBB' }，来自 custom_categories
+  export let categoryColors = null;
 
   const keyHours = [0, 6, 12, 18, 23];
   let selectedHour = null;
@@ -206,12 +212,20 @@
                   {/if}
                   <button
                     type="button"
-                    class={`w-full rounded-t-[10px] transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-sky-300 dark:focus:ring-sky-500 ${selectedHour === bucket.hour ? 'ring-2 ring-sky-300 dark:ring-sky-500' : ''} ${isPeak ? 'bg-sky-500 dark:bg-sky-400' : 'bg-slate-300 dark:bg-slate-600'}`}
+                    class={`w-full overflow-hidden rounded-t-[10px] transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-sky-300 dark:focus:ring-sky-500 ${selectedHour === bucket.hour ? 'ring-2 ring-sky-300 dark:ring-sky-500' : ''} ${categoryMode && bucket.duration > 0 ? '' : isPeak ? 'bg-sky-500 dark:bg-sky-400' : 'bg-slate-300 dark:bg-slate-600'}`}
                     style={`height: ${height}%; opacity: ${bucket.duration > 0 ? 1 : 0.35};`}
                     title={`${formatHourRangeLabel(bucket.hour)} · ${formatDurationLocalized(bucket.duration)}`}
                     aria-pressed={selectedHour === bucket.hour}
                     on:click={() => selectHour(bucket.hour)}
-                  ></button>
+                  >
+                    {#if categoryMode && bucket.duration > 0}
+                      <div class="flex h-full w-full flex-col justify-end">
+                        {#each (categoryBreakdown?.[bucket.hour] || []) as seg}
+                          <div style={`height: ${(seg.duration / bucket.duration) * 100}%; background: ${(categoryColors && categoryColors[seg.category]) || '#94a3b8'};`}></div>
+                        {/each}
+                      </div>
+                    {/if}
+                  </button>
                 </div>
               {/each}
             </div>

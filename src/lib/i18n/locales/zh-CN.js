@@ -92,6 +92,7 @@ export default {
       noAppStatsRange: '该日期段暂无应用统计数据',
       noAppStatsWeek: '本周暂无应用统计数据',
       hourlyActivity: '按小时活跃度',
+      hourlyColorMode: '切换按分类着色（单色/堆叠）',
       currentCategory: '当前分类：{label}',
       changeCategory: '修改分类',
       changeDomainCategoryTitle: '修改网站语义分类',

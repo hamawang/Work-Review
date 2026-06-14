@@ -115,6 +115,32 @@
   let lastCheckDate = currentTime.getDate();
   let appUsageViewMode = 'row';
   let hourlyActivityViewMode = 'column';
+  // #104: 按分类着色的柱状图（堆叠）
+  let hourlyColorMode = 'plain'; // 'plain'（蓝灰总时长）| 'category'（分类彩色堆叠）
+  let hourlyAppBreakdown = [];
+  let categoryList = [];
+  async function loadHourlyBreakdown() {
+    try {
+      hourlyAppBreakdown = await invoke('get_hourly_app_breakdown', { date: selectedDateFrom });
+    } catch (e) {
+      hourlyAppBreakdown = [];
+    }
+  }
+  // 切换日期时刷新 hourly 分类细分
+  $: { selectedDateFrom; if (categoryList.length) loadHourlyBreakdown(); }
+  $: hourlyCategoryColors = categoryList.reduce((acc, c) => {
+    acc[c.key] = c.color;
+    return acc;
+  }, {});
+  $: hourlyCategoryBreakdown = hourlyAppBreakdown.reduce((acc, bucket) => {
+    const cats = {};
+    for (const app of bucket.apps || []) {
+      const k = app.category || 'other';
+      cats[k] = (cats[k] || 0) + app.duration;
+    }
+    acc[bucket.hour] = Object.entries(cats).map(([category, duration]) => ({ category, duration }));
+    return acc;
+  }, {});
   let overviewViewModeReady = false;
   let overviewDateInputFrom = formatOverviewDateInput(selectedDateFrom);
   let overviewDateInputTo = formatOverviewDateInput(selectedDateTo);
@@ -565,6 +591,8 @@
     appUsageViewMode = readStoredOverviewViewMode(APP_USAGE_VIEW_MODE_KEY, 'row');
     hourlyActivityViewMode = readStoredOverviewViewMode(HOURLY_ACTIVITY_VIEW_MODE_KEY, 'column');
     overviewViewModeReady = true;
+    try { categoryList = await invoke('get_categories'); } catch (e) { categoryList = []; }
+    loadHourlyBreakdown();
     loadStats();
     if (!document.hidden) {
       clockInterval = setInterval(() => { 
@@ -919,6 +947,30 @@
             </svg>
           {/if}
         </button>
+        <button
+          type="button"
+          class="page-control-btn-icon"
+          title={t('overview.hourlyColorMode')}
+          aria-pressed={hourlyColorMode === 'category'}
+          on:click={() => {
+            hourlyColorMode = hourlyColorMode === 'plain' ? 'category' : 'plain';
+          }}
+        >
+          {#if hourlyColorMode === 'category'}
+            <svg class="h-4 w-4" viewBox="0 0 24 24">
+              <rect x="4.5" y="11" width="3.5" height="9" rx="1" fill="#3B82F6" />
+              <rect x="4.5" y="6" width="3.5" height="5" rx="1" fill="#22C55E" />
+              <rect x="10.25" y="9" width="3.5" height="11" rx="1" fill="#EAB308" />
+              <rect x="16" y="13" width="3.5" height="7" rx="1" fill="#EC4899" />
+            </svg>
+          {:else}
+            <svg class="h-4 w-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <rect x="4.5" y="8" width="3.5" height="12" rx="1" stroke-width="1.8" />
+              <rect x="10.25" y="4" width="3.5" height="16" rx="1" stroke-width="1.8" />
+              <rect x="16" y="11" width="3.5" height="9" rx="1" stroke-width="1.8" />
+            </svg>
+          {/if}
+        </button>
       </div>
       {#if loading || !stats}
         <div class="animate-pulse">
@@ -953,6 +1005,9 @@
           distributionTitle={hourlyChartDistributionTitle}
           distributionSubtitleKey={hourlyChartDistributionSubtitleKey}
           mode={hourlyActivityViewMode}
+          categoryMode={hourlyColorMode === 'category'}
+          categoryBreakdown={hourlyCategoryBreakdown}
+          categoryColors={hourlyCategoryColors}
         />
       {/if}
     </section>
