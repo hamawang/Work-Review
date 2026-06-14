@@ -929,6 +929,7 @@
     <section class="page-card overview-section-card overview-panel overview-panel-subtle">
       <div class="mb-3 flex items-center justify-between gap-3">
         <h3 class="page-section-title !mb-0">{t('overview.hourlyActivity')}</h3>
+        <div class="flex items-center gap-1">
         <button
           type="button"
           class="page-control-btn-icon"
@@ -971,6 +972,7 @@
             </svg>
           {/if}
         </button>
+        </div>
       </div>
       {#if loading || !stats}
         <div class="animate-pulse">
