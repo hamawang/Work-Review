@@ -92,7 +92,6 @@ export default {
       noAppStatsRange: 'No app stats available for this date range',
       noAppStatsWeek: 'No app stats available this week',
       hourlyActivity: 'Hourly Activity',
-      hourlyColorMode: 'Toggle color by category (solid/stacked)',
       currentCategory: 'Current: {label}',
       changeCategory: 'Change',
       changeDomainCategoryTitle: 'Update domain category',

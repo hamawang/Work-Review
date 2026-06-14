@@ -92,7 +92,6 @@ export default {
       noAppStatsRange: '此日期段暫無應用統計資料',
       noAppStatsWeek: '本週暫無應用統計資料',
       hourlyActivity: '按小時活躍度',
-      hourlyColorMode: '切換按分類著色（單色/堆疊）',
       currentCategory: '目前分類：{label}',
       changeCategory: '修改分類',
       changeDomainCategoryTitle: '修改網站語義分類',
