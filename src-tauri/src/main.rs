@@ -1565,11 +1565,10 @@ async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
                     activities,
                     state_guard.config.avatar_persona.clone(),
                     state_guard.config.avatar_followups.clone(),
-                    state_guard.config.avatar_click_through,
                 )
             };
 
-            if let (Ok(activities), persona, manual_followups, avatar_click_through) = followup_result {
+            if let (Ok(activities), persona, manual_followups) = followup_result {
                 let mut emitted_followup = false;
                 if let Some(payload) = crate::avatar_followup::find_followup_suggestion(
                     &activities,
@@ -1583,10 +1582,6 @@ async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
                         crate::avatar_followup::emit_followup_suggestion(&app, &payload);
                         crate::avatar_followup::note_followup_emitted(&payload.project_key, now_ms);
                         emitted_followup = true;
-                        // 穿透模式下跟进卡片需要可点击，临时关闭穿透，直到用户操作卡片后恢复
-                        if avatar_click_through {
-                            avatar_engine::set_avatar_click_through(&app, false);
-                        }
                     }
                 }
 
