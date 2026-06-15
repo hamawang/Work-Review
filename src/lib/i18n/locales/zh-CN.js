@@ -511,6 +511,7 @@ export default {
       removeSegment: '删除',
       workTimeHint: '仅统计以上工作时段，时段外记为休息',
       workTimeDisabledHint: '关闭后不再区分工作/休息，全天活动统一统计',
+      advancedWorkSettings: '高级工时设置',
       standardWorkHours: '每日标准工时',
       standardWorkHoursHint: '下班后的活动时长将显示为加班时长（弹性工时时按标准工时计算）',
       hours: '小时',

@@ -393,6 +393,7 @@ export default {
       removeSegment: 'Remove',
       workTimeHint: 'Only these segments are counted as work. Time outside these segments is treated as break.',
       workTimeDisabledHint: 'No work/break distinction — all activity tracked equally',
+      advancedWorkSettings: 'Advanced Work Settings',
       standardWorkHours: 'Standard Work Hours',
       standardWorkHoursHint: 'Activity after work hours is shown as overtime (flexible schedule uses standard hours)',
       hours: 'hours',

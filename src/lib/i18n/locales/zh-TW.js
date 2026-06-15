@@ -393,6 +393,7 @@ export default {
       removeSegment: '刪除',
       workTimeHint: '僅統計以上工作時段，時段外記為休息',
       workTimeDisabledHint: '關閉後不再區分工作/休息，全天活動統一統計',
+      advancedWorkSettings: '進階工時設定',
       standardWorkHours: '每日標準工時',
       standardWorkHoursHint: '下班後的活動時長將顯示為加班時長（彈性工時時按標準工時計算）',
       hours: '小時',
