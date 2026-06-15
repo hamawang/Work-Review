@@ -5111,6 +5111,15 @@ pub async fn handle_avatar_followup_action(
 
     crate::avatar_followup::apply_followup_action(&project_key, action, &input.persona);
 
+    // 用户已操作跟进卡片，恢复穿透模式（若开启）
+    let click_through_on = {
+        let state = state.lock().map_err(|e| AppError::Unknown(e.to_string()))?;
+        state.config.avatar_click_through
+    };
+    if click_through_on {
+        crate::avatar_engine::set_avatar_click_through(&app, true);
+    }
+
     Ok(serde_json::json!({
         "ok": true,
         "action": input.action,
