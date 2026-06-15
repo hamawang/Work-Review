@@ -618,6 +618,7 @@ export default {
       today: 'Today',
       yesterday: 'Yesterday',
       regenerate: 'Regenerate',
+      promptSettings: 'Prompt Settings',
       promptLabel: 'Extra Report Prompt',
       promptHint: 'Custom instructions for AI Enhanced mode',
       loadingTitle: 'Preparing report',

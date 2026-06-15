@@ -618,6 +618,7 @@ export default {
       today: '今天',
       yesterday: '昨天',
       regenerate: '重新生成',
+      promptSettings: '提示詞設定',
       promptLabel: '日報附加提示詞',
       promptHint: 'AI 增強模式下附加的自定義要求',
       loadingTitle: '正在整理日報',

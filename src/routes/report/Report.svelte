@@ -6,6 +6,7 @@
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
   import { showToast } from '../../lib/stores/toast.js';
+  import CollapsibleSection from '../../lib/components/CollapsibleSection.svelte';
   import { cache } from '../../lib/stores/cache.js';
   import { formatLocalizedDate, formatLocalizedTime, formatDurationLocalized, locale, t } from '$lib/i18n/index.js';
   import { shouldShowPromptAppliedToast } from './reportPromptFeedback.js';
@@ -600,7 +601,7 @@
 
   <div class="report-editorial-stack">
   {#if config && config.ai_mode === 'summary'}
-    <div class="page-card report-sheet report-sheet-controls">
+    <CollapsibleSection title={t('report.promptSettings')} storageKey="report.promptSettings">
       <div class="flex items-center justify-between mb-1.5">
         <label for="daily-report-custom-prompt" class="settings-label">{t('report.promptLabel')}</label>
         <div class="relative">
@@ -736,7 +737,7 @@
           placeholder={t('report.systemPromptOverridePlaceholder')}
         ></textarea>
       </div>
-    </div>
+    </CollapsibleSection>
   {/if}
 
   <!-- 日报内容 -->
