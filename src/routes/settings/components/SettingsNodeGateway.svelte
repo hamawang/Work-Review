@@ -3,6 +3,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { locale, t } from '$lib/i18n/index.js';
   import { showToast } from '$lib/stores/toast.js';
+  import CollapsibleSection from '$lib/components/CollapsibleSection.svelte';
 
   export let config;
   export let dataDir = '';
@@ -301,19 +302,8 @@
         </div>
       </div>
 
-      <!-- ========== Bot 集成 大卡片 ========== -->
-      <div class="rounded-2xl border border-slate-200/80 bg-slate-50/90 p-4 space-y-4 dark:border-slate-700/80 dark:bg-slate-800/40">
-        <!-- Bot 集成 标题 -->
-        <div class="flex items-center gap-2">
-          <div class="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-100 dark:bg-indigo-900/30">
-            <svg class="w-4 h-4 text-indigo-600 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M8.288 15.038a5.25 5.25 0 017.424 0M5.106 11.856c3.807-3.808 9.98-3.808 13.788 0M1.924 8.674c5.565-5.565 14.587-5.565 20.152 0" />
-            </svg>
-          </div>
-          <div>
-            <span class="text-sm font-semibold text-slate-700 dark:text-slate-200">{t('nodeGatewayPage.botIntegration')}</span>
-          </div>
-        </div>
+      <!-- ========== Bot 集成（折叠） ========== -->
+      <CollapsibleSection title={t('nodeGatewayPage.botIntegration')} storageKey="settings.node.bots">
 
         <!-- Local API -->
         <div class="rounded-xl bg-white/70 px-3.5 py-3 ring-1 ring-slate-200/70 dark:bg-slate-900/20 dark:ring-slate-700/70">
@@ -886,7 +876,7 @@
           {/if}
         </div>
         {/if}
-      </div>
+      </CollapsibleSection>
 
       <!-- ========== MCP Server 大卡片 ========== -->
       <div class="rounded-2xl border border-slate-200/80 bg-slate-50/90 p-4 space-y-4 dark:border-slate-700/80 dark:bg-slate-800/40">

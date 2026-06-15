@@ -5,6 +5,7 @@
   import { cache } from '../../../lib/stores/cache.js';
   import { locale, t } from '$lib/i18n/index.js';
   import { showToast } from '$lib/stores/toast.js';
+  import CollapsibleSection from '../../../lib/components/CollapsibleSection.svelte';
   
   export let config;
   export let storageStats = null;
@@ -497,11 +498,12 @@
   </div>
 </div>
 
-<!-- 远程存储 -->
-<div class="settings-card mb-5" data-locale={currentLocale}>
-  <h3 class="settings-card-title">{t('settingsStorage.remoteStorageTitle')}</h3>
-  <p class="settings-card-desc mb-0">{t('settingsStorage.remoteStorageDesc')}</p>
-
+<!-- 远程存储（折叠，默认收起） -->
+<CollapsibleSection
+  title={t('settingsStorage.remoteStorageTitle')}
+  subtitle={t('settingsStorage.remoteStorageDesc')}
+  storageKey="settings.storage.remoteBackup"
+>
   <div class="settings-section space-y-4">
     <div class="rounded-2xl border border-slate-200/80 bg-slate-50/90 p-4 dark:border-slate-700/80 dark:bg-slate-800/40">
       <div class="flex items-center gap-2 mb-3">
@@ -799,7 +801,7 @@
       </div>
     {/if}
   </div>
-</div>
+</CollapsibleSection>
 
 <div class="settings-card mb-5" data-locale={currentLocale}>
   <h3 class="settings-card-title">{t('settingsStorage.dataDirTitle')}</h3>
