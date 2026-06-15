@@ -3151,6 +3151,11 @@ async fn main() {
                 avatar_engine::emit_avatar_state(app.handle(), &avatar_state);
             }
 
+            // 初始化智能穿透运行时 flag（从启动 config，供 input bridge 轮询无锁读）
+            if let Ok(s) = state.inner().lock() {
+                avatar_input::set_avatar_enabled_flag(s.config.avatar_enabled);
+                avatar_input::set_avatar_click_through_flag(s.config.avatar_click_through);
+            }
             avatar_input::start_avatar_input_monitor(app.handle());
             avatar_input::spawn_avatar_input_bridge(app.handle().clone());
 

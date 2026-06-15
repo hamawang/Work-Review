@@ -3982,6 +3982,13 @@ pub(crate) fn persist_app_config(
         crate::avatar_engine::set_avatar_click_through(&app, config.avatar_click_through);
     }
 
+    // 同步智能穿透运行时 flag（供 spawn_avatar_input_bridge 轮询无锁读）
+    crate::avatar_input::set_avatar_enabled_flag(config.avatar_enabled);
+    crate::avatar_input::set_avatar_click_through_flag(config.avatar_click_through);
+    if avatar_window_changed || avatar_click_through_changed {
+        crate::avatar_input::force_resync_click_through();
+    }
+
     if dock_visibility_changed {
         crate::sync_effective_dock_visibility(&app);
     }

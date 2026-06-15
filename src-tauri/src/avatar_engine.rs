@@ -443,6 +443,23 @@ pub fn set_avatar_click_through(app: &AppHandle, click_through: bool) {
     }
 }
 
+/// 矩形命中测试（纯函数，便于单测）。左上闭、右下开。
+fn point_in_rect(cx: i64, cy: i64, x: i64, y: i64, w: i64, h: i64) -> bool {
+    cx >= x && cy >= y && cx < x + w && cy < y + h
+}
+
+/// 全局鼠标是否落在桌宠窗口矩形内（物理像素）。用于智能穿透命中测试。
+/// 注意：用 `outer_size()`（物理），不用 `avatar_window_size`（逻辑），避免 DPR≠1 偏移。
+pub fn avatar_window_hit_by_cursor(app: &AppHandle) -> bool {
+    let Some(window) = app.get_webview_window(AVATAR_WINDOW_LABEL) else {
+        return false;
+    };
+    let Ok(pos) = window.outer_position() else { return false; };
+    let Ok(size) = window.outer_size() else { return false; };
+    let Some((cx, cy)) = crate::avatar_input::global_cursor_position(app) else { return false; };
+    point_in_rect(cx, cy, pos.x as i64, pos.y as i64, size.width as i64, size.height as i64)
+}
+
 pub fn apply_avatar_window_expansion(
     app: &AppHandle,
     scale: f64,
@@ -720,10 +737,22 @@ mod tests {
     use super::{
         avatar_window_size, clamp_avatar_position, clamp_avatar_position_with_size,
         default_avatar_state, derive_avatar_state, derive_avatar_state_with_rules,
-        remembered_avatar_position, resolve_avatar_position, Rect, AVATAR_WINDOW_HEIGHT,
-        AVATAR_WINDOW_WIDTH,
+        point_in_rect, remembered_avatar_position, resolve_avatar_position, Rect,
+        AVATAR_WINDOW_HEIGHT, AVATAR_WINDOW_WIDTH,
     };
     use crate::config::AppCategoryRule;
+
+    #[test]
+    fn point_in_rect_边界判定() {
+        // 左上闭、右下开
+        assert!(point_in_rect(5, 5, 0, 0, 10, 10), "内部应命中");
+        assert!(point_in_rect(0, 0, 0, 0, 10, 10), "左上角应命中（闭）");
+        assert!(!point_in_rect(10, 10, 0, 0, 10, 10), "右下角不应命中（开）");
+        assert!(!point_in_rect(-1, 5, 0, 0, 10, 10), "左侧外不应命中");
+        assert!(!point_in_rect(5, 10, 0, 0, 10, 10), "下边外不应命中");
+        assert!(point_in_rect(-5, -5, -10, -10, 8, 8), "负坐标内部应命中");
+        assert!(!point_in_rect(0, 0, 0, 0, 0, 0), "零尺寸矩形不应命中");
+    }
 
     #[test]
     fn 空闲状态应优先进入待机模式() {

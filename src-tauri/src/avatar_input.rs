@@ -2,7 +2,7 @@
 // dead_code allow 在 main.rs 的 mod 声明处设置
 use crate::avatar_engine::AvatarInputPayload;
 use once_cell::sync::Lazy;
-use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI8, AtomicU16, AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::AppHandle;
@@ -19,6 +19,22 @@ static CURSOR_RATIO_X_PERMILLE: AtomicU32 = AtomicU32::new(500);
 static CURSOR_RATIO_Y_PERMILLE: AtomicU32 = AtomicU32::new(500);
 static INPUT_BRIDGE_STARTED: AtomicBool = AtomicBool::new(false);
 static INPUT_MONITOR_STARTED: AtomicBool = AtomicBool::new(false);
+// 智能穿透运行时状态（无锁读，避免轮询每轮锁 Mutex）
+static AVATAR_CLICK_THROUGH_ENABLED: AtomicBool = AtomicBool::new(false);
+static AVATAR_ENABLED_FLAG: AtomicBool = AtomicBool::new(false);
+// set_ignore_cursor_events 缓存：-1=未知，0=false，1=true
+static AVATAR_CLICK_THROUGH_IGNORE_CACHE: AtomicI8 = AtomicI8::new(-1);
+
+pub fn set_avatar_click_through_flag(on: bool) {
+    AVATAR_CLICK_THROUGH_ENABLED.store(on, Ordering::Relaxed);
+}
+pub fn set_avatar_enabled_flag(on: bool) {
+    AVATAR_ENABLED_FLAG.store(on, Ordering::Relaxed);
+}
+/// 重置 ignore 缓存，强制下一轮命中测试重新同步（穿透配置/窗口变更时调）。
+pub fn force_resync_click_through() {
+    AVATAR_CLICK_THROUGH_IGNORE_CACHE.store(-1, Ordering::Relaxed);
+}
 static KEYBOARD_STATE: Lazy<Mutex<KeyboardInputState>> =
     Lazy::new(|| Mutex::new(KeyboardInputState::default()));
 
@@ -1002,6 +1018,7 @@ pub fn spawn_avatar_input_bridge(app: AppHandle) {
 
     tauri::async_runtime::spawn(async move {
         let mut last_payload: Option<AvatarInputPayload> = None;
+        let mut tick: u32 = 0;
 
         loop {
             let next_payload = build_avatar_input_payload(now_ms());
@@ -1010,9 +1027,63 @@ pub fn spawn_avatar_input_bridge(app: AppHandle) {
                 last_payload = Some(next_payload);
             }
 
+            // 智能穿透命中测试：每 4 轮（~64ms）
+            tick = tick.wrapping_add(1);
+            if tick % 4 == 0 {
+                apply_smart_click_through(&app);
+            }
+
             tokio::time::sleep(INPUT_BRIDGE_POLL_INTERVAL).await;
         }
     });
+}
+
+/// 智能穿透：穿透开启且桌宠启用时，鼠标在桌宠窗口内→不穿透（可交互），外→穿透。
+/// 仅当目标状态与缓存不同时（或 force_resync 重置后）才经主线程调 setter，避免高频闪烁。
+fn apply_smart_click_through(app: &AppHandle) {
+    if !AVATAR_ENABLED_FLAG.load(Ordering::Relaxed) {
+        return; // 桌宠禁用，不触碰穿透
+    }
+    let click_through_on = AVATAR_CLICK_THROUGH_ENABLED.load(Ordering::Relaxed);
+    let desired_ignore = if click_through_on {
+        !crate::avatar_engine::avatar_window_hit_by_cursor(app)
+    } else {
+        false
+    };
+    let desired_cache: i8 = if desired_ignore { 1 } else { 0 };
+    if AVATAR_CLICK_THROUGH_IGNORE_CACHE.swap(desired_cache, Ordering::Relaxed) != desired_cache {
+        let app_clone = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            crate::avatar_engine::set_avatar_click_through(&app_clone, desired_ignore);
+        });
+    }
+}
+
+/// 全局鼠标绝对坐标（Tauri 虚拟屏幕物理像素，y 向下，与 `window.outer_position()` 同系）。
+/// 用三平台已采集的 cursor_ratio（static）+ Tauri available_monitors 虚拟 bounds 还原，
+/// 避免每平台单独 FFI。精度为虚拟屏幕尺寸的 1/1000（permille），命中测试窗口矩形足够。
+pub fn global_cursor_position(app: &AppHandle) -> Option<(i64, i64)> {
+    let ratio_x = CURSOR_RATIO_X_PERMILLE.load(Ordering::Relaxed) as f64 / 1000.0;
+    let ratio_y = CURSOR_RATIO_Y_PERMILLE.load(Ordering::Relaxed) as f64 / 1000.0;
+    let monitors = app.available_monitors().ok()?;
+    if monitors.is_empty() {
+        return None;
+    }
+    let mut min_x = i32::MAX;
+    let mut min_y = i32::MAX;
+    let mut max_x = i32::MIN;
+    let mut max_y = i32::MIN;
+    for m in &monitors {
+        let pos = m.position();
+        let size = m.size();
+        min_x = min_x.min(pos.x);
+        min_y = min_y.min(pos.y);
+        max_x = max_x.max(pos.x + size.width as i32);
+        max_y = max_y.max(pos.y + size.height as i32);
+    }
+    let abs_x = min_x as f64 + ratio_x * (max_x - min_x) as f64;
+    let abs_y = min_y as f64 + ratio_y * (max_y - min_y) as f64;
+    Some((abs_x.round() as i64, abs_y.round() as i64))
 }
 
 #[cfg(target_os = "macos")]
