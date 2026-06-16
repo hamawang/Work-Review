@@ -118,6 +118,7 @@
   // #104: 按分类着色的柱状图（堆叠）
   let hourlyAppBreakdown = [];
   let categoryList = [];
+  let workGoalMinutes = null;
   async function loadHourlyBreakdown() {
     try {
       hourlyAppBreakdown = await invoke('get_hourly_app_breakdown', { date: selectedDateFrom });
@@ -595,6 +596,7 @@
     hourlyActivityViewMode = readStoredOverviewViewMode(HOURLY_ACTIVITY_VIEW_MODE_KEY, 'column');
     overviewViewModeReady = true;
     try { categoryList = await invoke('get_categories'); } catch (e) { categoryList = []; }
+    try { const cfg = await invoke('get_config'); workGoalMinutes = cfg.daily_work_goal_minutes ?? null; } catch (e) {}
     loadHourlyBreakdown();
     loadStats();
     if (!document.hidden) {
@@ -987,6 +989,9 @@
           categoryBreakdown={hourlyCategoryBreakdown}
           categoryColors={hourlyCategoryColors}
           categoryNames={hourlyCategoryNames}
+          appBreakdown={hourlyAppBreakdown}
+          workDuration={stats?.work_time_duration || 0}
+          workGoalMinutes={workGoalMinutes}
         />
       {/if}
     </section>

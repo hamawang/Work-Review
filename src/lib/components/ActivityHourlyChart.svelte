@@ -16,6 +16,12 @@
   export let categoryColors = null;
   // { [category]: '分类名' }，用于图例
   export let categoryNames = null;
+  // 每小时×应用明细（HourlyAppBucket[]），点击柱子时展示该小时 top 应用
+  export let appBreakdown = null;
+  // 今日工作时长（秒），用于目标进度卡片
+  export let workDuration = 0;
+  // 每日工作目标（分钟），null = 不设目标
+  export let workGoalMinutes = null;
 
   const keyHours = [0, 6, 12, 18, 23];
   let selectedHour = null;
@@ -43,16 +49,6 @@
     return 'justify-center';
   }
 
-  function tooltipAlignmentClass(hour) {
-    if (hour <= 2) {
-      return 'left-0';
-    }
-    if (hour >= 21) {
-      return 'right-0';
-    }
-    return 'left-1/2 -translate-x-1/2';
-  }
-
   function formatAxisTickLabel(seconds) {
     const minutes = Math.round(seconds / 60);
     if (minutes === 0) {
@@ -66,6 +62,16 @@
 
   function selectHour(hour) {
     selectedHour = hour;
+  }
+
+  // 统一紧凑时长格式：≥1min 显示 "Xm Ys"，<1min 显示 "Xs"
+  function formatCompact(seconds) {
+    if (!seconds || seconds <= 0) return '0s';
+    const m = Math.floor(seconds / 60);
+    const s = Math.round(seconds % 60);
+    if (m === 0) return `${s}s`;
+    if (s === 0) return `${m}m`;
+    return `${m}m ${s}s`;
   }
 
   $: buckets = Array.from({ length: 24 }, (_, hour) => {
@@ -106,17 +112,17 @@
   })();
   $: yAxisTicks = [axisMax, Math.round(axisMax * 2 / 3), Math.round(axisMax / 3), 0];
   $: summaryCardClass = embedded
-    ? 'min-h-[96px] rounded-[22px] bg-slate-50/90 p-4 text-center dark:bg-slate-900/30'
+    ? 'min-h-[88px] rounded-[22px] bg-slate-50/90 px-2 py-3 text-center dark:bg-slate-900/30'
     : 'min-h-[104px] rounded-2xl border border-slate-100 bg-white p-4 text-center dark:border-slate-700/60 dark:bg-slate-800/80';
   $: summaryValueClass =
-    'mt-4 min-w-0 whitespace-nowrap overflow-hidden leading-none text-[clamp(1rem,2.5vw,1.75rem)] font-semibold tracking-tight text-slate-800 dark:text-white';
+    'mt-2 text-center text-base font-semibold tracking-tight text-slate-800 dark:text-white leading-tight';
   $: chartShellClass = embedded
     ? 'rounded-[24px] bg-transparent p-0'
     : 'rounded-2xl border border-slate-100 bg-white p-4 dark:border-slate-700/60 dark:bg-slate-800/80';
 </script>
 
 <div class="space-y-4" data-locale={currentLocale}>
-  <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
+  <div class="grid grid-cols-4 gap-2">
     <div class={summaryCardClass}>
       <p class="text-[13px] font-medium text-slate-400 dark:text-slate-500">{peakHourLabel || t('hourlyChart.peakHour')}</p>
       <p class={summaryValueClass}>
@@ -126,7 +132,7 @@
     <div class={summaryCardClass}>
       <p class="text-[13px] font-medium text-slate-400 dark:text-slate-500">{peakDurationLabel || t('hourlyChart.peakDuration')}</p>
       <p class={summaryValueClass}>
-        {formatDurationLocalized(peakBucket.duration, { compact: true })}
+        {formatCompact(peakBucket.duration)}
       </p>
     </div>
     <div class={summaryCardClass}>
@@ -136,10 +142,23 @@
       </p>
     </div>
     <div class={summaryCardClass}>
-      <p class="text-[13px] font-medium text-slate-400 dark:text-slate-500">{t('hourlyChart.totalDuration')}</p>
-      <p class={summaryValueClass}>
-        {formatDurationLocalized(totalDuration, { compact: true })}
-      </p>
+      {#if workGoalMinutes && workGoalMinutes > 0}
+        {@const goalSecs = workGoalMinutes * 60}
+        {@const pct = Math.min(100, Math.round((workDuration / goalSecs) * 100))}
+        {@const reached = workDuration >= goalSecs}
+        <p class="text-[13px] font-medium {reached ? 'text-emerald-500' : 'text-slate-400 dark:text-slate-500'}">{t('hourlyChart.workGoal')}</p>
+        <p class={summaryValueClass}>
+          {formatCompact(workDuration)} <span class="text-[0.7em] text-slate-400">/ {formatCompact(goalSecs)}</span>
+        </p>
+        <div class="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+          <div class={`h-full rounded-full transition-all duration-500 ${reached ? 'bg-emerald-500' : 'bg-primary-500'}`} style={`width: ${pct}%;`}></div>
+        </div>
+      {:else}
+        <p class="text-[13px] font-medium text-slate-400 dark:text-slate-500">{t('hourlyChart.totalDuration')}</p>
+        <p class={summaryValueClass}>
+          {formatCompact(totalDuration)}
+        </p>
+      {/if}
     </div>
   </div>
 
@@ -190,14 +209,43 @@
           >
             <span class="text-[11px] font-medium text-slate-500 dark:text-slate-400">{formatHourLabel(bucket.hour)}</span>
             <div class="h-3 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700/60">
-              <div
-                class={`h-full rounded-full transition-all duration-300 ${isPeak ? 'bg-sky-500 dark:bg-sky-400' : 'bg-slate-400 dark:bg-slate-500'}`}
-                style={`width: ${width}%; opacity: ${bucket.duration > 0 ? 1 : 0.35};`}
-                title={`${formatHourRangeLabel(bucket.hour)} · ${formatDurationLocalized(bucket.duration)}`}
-              ></div>
+              {#if categoryMode && bucket.duration > 0}
+                <div class="flex h-full" style={`width: ${width}%;`}>
+                  {#each (categoryBreakdown?.[bucket.hour] || []) as seg}
+                    <div
+                      style={`width: ${(seg.duration / bucket.duration) * 100}%; background: ${(categoryColors && categoryColors[seg.category]) || '#94a3b8'};`}
+                      class="h-full"
+                      title={`${formatHourRangeLabel(bucket.hour)} · ${formatDurationLocalized(bucket.duration)}`}
+                    ></div>
+                  {/each}
+                </div>
+              {:else}
+                <div
+                  class={`h-full rounded-full transition-all duration-300 ${isPeak ? 'bg-sky-500 dark:bg-sky-400' : 'bg-slate-400 dark:bg-slate-500'}`}
+                  style={`width: ${width}%; opacity: ${bucket.duration > 0 ? 1 : 0.35};`}
+                  title={`${formatHourRangeLabel(bucket.hour)} · ${formatDurationLocalized(bucket.duration)}`}
+                ></div>
+              {/if}
             </div>
-            <span class="text-right text-[11px] font-medium tabular-nums text-slate-500 dark:text-slate-400">{formatDurationLocalized(bucket.duration, { compact: true })}</span>
+            <span class="text-right text-[11px] font-medium tabular-nums text-slate-500 dark:text-slate-400">{formatCompact(bucket.duration)}</span>
           </button>
+          {#if selectedHour === bucket.hour && bucket.duration > 0}
+            {@const hourApps = (appBreakdown?.find(b => b.hour === bucket.hour)?.apps || [])
+              .slice().sort((a, b) => b.duration - a.duration).slice(0, 5)}
+            <div class="ml-[3.5rem] mr-[5rem] mb-1 rounded-lg bg-white/80 px-3 py-2 ring-1 ring-slate-200/60 dark:bg-slate-800/60 dark:ring-slate-700/60">
+              {#if hourApps.length > 0}
+                <div class="flex flex-wrap gap-x-3 gap-y-1">
+                  {#each hourApps as app}
+                    <span class="inline-flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
+                      <span class="inline-block h-2 w-2 rounded-sm" style={`background: ${(categoryColors && categoryColors[app.category]) || '#94a3b8'};`}></span>
+                      <span>{app.app_name}</span>
+                      <span class="tabular-nums text-slate-400">{formatCompact(app.duration)}</span>
+                    </span>
+                  {/each}
+                </div>
+              {/if}
+            </div>
+          {/if}
         {/each}
       </div>
     {:else}
@@ -223,28 +271,16 @@
                 {@const height = bucket.duration > 0 ? Math.max((bucket.duration / axisMax) * 100, 6) : 2}
                 {@const isPeak = bucket.duration > 0 && bucket.hour === peakBucket.hour}
                 <div class="relative flex h-full min-w-0 flex-1 flex-col justify-end">
-                  {#if mode === 'column' && selectedHour === bucket.hour}
-                    <div class={`pointer-events-none absolute top-1 z-10 ${tooltipAlignmentClass(bucket.hour)}`}>
-                      <span class="flex min-w-[6.75rem] flex-col items-center rounded-2xl bg-slate-900 px-2.5 py-1.5 text-[10px] font-medium text-white shadow-sm dark:bg-slate-100 dark:text-slate-900">
-                        <span class="whitespace-nowrap">
-                          {formatHourRangeLabel(bucket.hour)}
-                        </span>
-                        <span class="mt-0.5 whitespace-nowrap text-[9px] opacity-80">
-                          {formatDurationLocalized(bucket.duration, { compact: true })}
-                        </span>
-                      </span>
-                    </div>
-                  {/if}
                   <button
                     type="button"
-                    class={`w-full overflow-hidden rounded-t-[10px] transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-sky-300 dark:focus:ring-sky-500 ${selectedHour === bucket.hour ? 'ring-2 ring-sky-300 dark:ring-sky-500' : ''} ${categoryMode && bucket.duration > 0 ? '' : isPeak ? 'bg-sky-500 dark:bg-sky-400' : 'bg-slate-300 dark:bg-slate-600'}`}
-                    style={`height: ${height}%; opacity: ${bucket.duration > 0 ? 1 : 0.35};`}
+                    class={`w-full overflow-hidden transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-sky-300 dark:focus:ring-sky-500 ${selectedHour === bucket.hour ? 'ring-2 ring-sky-300 dark:focus:ring-sky-500' : ''} ${categoryMode && bucket.duration > 0 ? '' : isPeak ? 'bg-sky-500 dark:bg-sky-400' : 'bg-slate-300 dark:bg-slate-600'}`}
+                    style={`height: ${height}%; opacity: ${bucket.duration > 0 ? 1 : 0.35}; border-top-left-radius: 10px; border-top-right-radius: 10px;`}
                     title={`${formatHourRangeLabel(bucket.hour)} · ${formatDurationLocalized(bucket.duration)}`}
                     aria-pressed={selectedHour === bucket.hour}
                     on:click={() => selectHour(bucket.hour)}
                   >
                     {#if categoryMode && bucket.duration > 0}
-                      <div class="flex h-full w-full flex-col justify-end">
+                      <div class="flex h-full w-full flex-col justify-end overflow-hidden" style="border-top-left-radius: 10px; border-top-right-radius: 10px;">
                         {#each (categoryBreakdown?.[bucket.hour] || []) as seg}
                           <div style={`height: ${(seg.duration / bucket.duration) * 100}%; background: ${(categoryColors && categoryColors[seg.category]) || '#94a3b8'};`}></div>
                         {/each}
@@ -270,17 +306,32 @@
         </div>
       </div>
 
-      {#if mode === 'column' && selectedBucket}
-        <div class="mt-3 grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-2xl bg-sky-50 px-3.5 py-3 text-left dark:bg-sky-500/10">
-          <span class="inline-flex items-center rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold tracking-[0.08em] text-sky-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] dark:bg-slate-900/80 dark:text-sky-300">
-            当前选中
-          </span>
-          <span class="min-w-0 truncate text-sm font-medium text-slate-700 dark:text-slate-200">
-            {formatHourRangeLabel(selectedBucket.hour)}
-          </span>
-          <span class="text-sm font-semibold tabular-nums text-slate-500 dark:text-slate-300">
-            {formatDurationLocalized(selectedBucket.duration, { compact: true })}
-          </span>
+      {#if selectedBucket}
+        {@const hourApps = (appBreakdown?.find(b => b.hour === selectedBucket.hour)?.apps || [])
+          .slice().sort((a, b) => b.duration - a.duration).slice(0, 5)}
+        <div class="mt-3 rounded-2xl bg-sky-50 px-3.5 py-3 text-left dark:bg-sky-500/10">
+          <div class="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
+            <span class="inline-flex items-center rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold tracking-[0.08em] text-sky-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] dark:bg-slate-900/80 dark:text-sky-300">
+              当前选中
+            </span>
+            <span class="min-w-0 truncate text-sm font-medium text-slate-700 dark:text-slate-200">
+              {formatHourRangeLabel(selectedBucket.hour)}
+            </span>
+            <span class="text-sm font-semibold tabular-nums text-slate-500 dark:text-slate-300">
+              {formatCompact(selectedBucket.duration)}
+            </span>
+          </div>
+          {#if hourApps.length > 0}
+            <div class="mt-2 flex flex-wrap gap-x-3 gap-y-1">
+              {#each hourApps as app}
+                <span class="inline-flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
+                  <span class="inline-block h-2 w-2 rounded-sm" style={`background: ${(categoryColors && categoryColors[app.category]) || '#94a3b8'};`}></span>
+                  <span>{app.app_name}</span>
+                  <span class="tabular-nums text-slate-400">{formatCompact(app.duration)}</span>
+                </span>
+              {/each}
+            </div>
+          {/if}
         </div>
       {/if}
     {/if}

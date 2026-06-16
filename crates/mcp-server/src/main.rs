@@ -327,6 +327,11 @@ fn tools_list() -> Vec<Value> {
                 }
             }
         }),
+        json!({
+            "name": "get_current_context",
+            "description": "获取用户当前工作上下文：正在使用的应用、窗口标题、分类、持续时间、最近切换的应用。让 AI 工具一步了解用户在做什么，无需先查时间线再分析。",
+            "inputSchema": { "type": "object", "properties": {} }
+        }),
     ]
 }
 
@@ -494,6 +499,52 @@ fn handle_tool_call(name: &str, args: &Value, state: &Arc<Mutex<AppState>>) -> V
                 }),
                 Ok(None) => tool_error(&format!("未找到 {} 的报告", date)),
                 Err(e) => tool_error(&format!("获取报告失败: {e}")),
+            }
+        }),
+        "get_current_context" => with_policy_check(state, name, Permission::ReadActivities, |s| {
+            let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+            match s.db.get_timeline(&today, Some(10), None) {
+                Ok(activities) if !activities.is_empty() => {
+                    let current = &activities[0];
+                    let primary_app = &current.app_name;
+                    let mut duration_secs: i64 = current.duration;
+                    for a in activities.iter().skip(1) {
+                        if a.app_name == *primary_app {
+                            duration_secs += a.duration;
+                        } else {
+                            break;
+                        }
+                    }
+                    let mut recent_apps: Vec<&str> = Vec::new();
+                    let mut seen = std::collections::HashSet::new();
+                    for a in &activities {
+                        if seen.insert(a.app_name.as_str()) {
+                            recent_apps.push(&a.app_name);
+                            if recent_apps.len() >= 5 {
+                                break;
+                            }
+                        }
+                    }
+                    let context = json!({
+                        "primary_app": primary_app,
+                        "window_title": current.window_title,
+                        "category": current.category,
+                        "duration_minutes": duration_secs / 60,
+                        "browser_url": current.browser_url,
+                        "recent_apps": recent_apps,
+                        "hint": format!("用户当前正在使用 {}{}", primary_app,
+                            if current.window_title.is_empty() { String::new() }
+                            else { format!("（{}）", current.window_title) }),
+                    });
+                    json!({
+                        "content": [{
+                            "type": "text",
+                            "text": serde_json::to_string_pretty(&context).unwrap_or_default()
+                        }]
+                    })
+                }
+                Ok(_) => tool_error("暂无活动记录"),
+                Err(e) => tool_error(&format!("获取当前上下文失败: {e}")),
             }
         }),
         "get_device_status" => with_policy_check(state, name, Permission::ReadDeviceStatus, |s| {

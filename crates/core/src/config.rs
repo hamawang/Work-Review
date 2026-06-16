@@ -816,6 +816,12 @@ pub struct AppConfig {
     /// 连续活跃多久后提醒（分钟）
     #[serde(default = "default_break_reminder_interval_minutes")]
     pub break_reminder_interval_minutes: u64,
+    /// 每日工作时长目标（分钟），None = 不设目标
+    #[serde(default)]
+    pub daily_work_goal_minutes: Option<u32>,
+    /// 达到目标时桌宠庆祝提醒
+    #[serde(default)]
+    pub goal_notifications: bool,
     /// 是否启用桌面化身窗口
     #[serde(default)]
     pub avatar_enabled: bool,
@@ -970,6 +976,8 @@ impl Default for AppConfig {
             lightweight_mode: false,
             break_reminder_enabled: false,
             break_reminder_interval_minutes: default_break_reminder_interval_minutes(),
+            daily_work_goal_minutes: None,
+            goal_notifications: false,
             avatar_enabled: false,
             avatar_scale: default_avatar_scale(),
             avatar_opacity: default_avatar_opacity(),

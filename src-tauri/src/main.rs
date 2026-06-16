@@ -1322,6 +1322,13 @@ async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
     let mut last_window_signature: Option<String> = None;
     let mut break_reminder_runtime = BreakReminderRuntime::new();
     let mut avatar_nudge_runtime = AvatarNudgeRuntime::default();
+    // 频繁切换检测运行时
+    let mut last_switch_signature: Option<String> = None;
+    let mut recent_switches_ms: std::collections::VecDeque<u64> = std::collections::VecDeque::new();
+    let mut last_focus_nudge_ms: u64 = 0;
+    // 工作目标庆祝：防止同一天重复庆祝
+    let mut goal_celebrated_date: String = String::new();
+    let mut goal_check_counter: u32 = 0;
     let mut cached_rules: Vec<work_review_core::config::AppCategoryRule> = Vec::new();
     let mut cached_custom_categories: Vec<work_review_core::config::CustomCategory> = Vec::new();
     let mut cached_rules_signature: u64 = 0;
@@ -1439,6 +1446,36 @@ async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
         }
 
         let input_idle = idle_detector.is_input_idle();
+        // 工作目标庆祝：每 ~60 轮检查一次（约 1-2 分钟）
+        goal_check_counter = goal_check_counter.wrapping_add(1);
+        if goal_check_counter % 60 == 0 && avatar_enabled {
+            let (goal_minutes, goal_notify) = {
+                let s = state.lock().unwrap_or_else(|e| e.into_inner());
+                (s.config.daily_work_goal_minutes, s.config.goal_notifications)
+            };
+            if goal_notify {
+                if let Some(goal) = goal_minutes {
+                    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+                    if today != goal_celebrated_date {
+                        let work_secs = {
+                            let s = state.lock().unwrap_or_else(|e| e.into_inner());
+                            let segments = s.config.effective_work_segments();
+                            s.database.get_daily_stats_with_segments(&today, &segments)
+                                .map(|st| st.work_time_duration)
+                                .unwrap_or(0)
+                        };
+                        if work_secs >= (goal as i64 * 60) {
+                            avatar_engine::emit_avatar_bubble(
+                                &app,
+                                &avatar_engine::AvatarBubblePayload::success("🎉 今日工作目标达成！继续保持！"),
+                            );
+                            goal_celebrated_date = today;
+                        }
+                    }
+                }
+            }
+        }
+
         let reminder_result = if !(avatar_enabled && break_reminder_enabled) {
             advance_break_reminder(
                 &mut break_reminder_runtime,
@@ -1490,6 +1527,34 @@ async fn background_avatar_task(state: Arc<Mutex<AppState>>, app: AppHandle) {
             active_window.browser_url.as_deref().unwrap_or_default()
         );
         let window_changed = last_window_signature.as_deref() != Some(window_signature.as_str());
+
+        // 方向 2：频繁切换检测 —— 5 分钟内切换 ≥6 次 → 桌宠提醒专注（30 分钟冷却）
+        let actually_switched = last_switch_signature.as_deref() != Some(window_signature.as_str());
+        last_switch_signature = Some(window_signature.clone());
+        if actually_switched && is_recording && !is_paused {
+            let switch_ms = chrono::Local::now().timestamp_millis().max(0) as u64;
+            recent_switches_ms.push_back(switch_ms);
+            while let Some(&old) = recent_switches_ms.front() {
+                if switch_ms.saturating_sub(old) > 5 * 60 * 1000 {
+                    recent_switches_ms.pop_front();
+                } else {
+                    break;
+                }
+            }
+            if recent_switches_ms.len() >= 6
+                && switch_ms.saturating_sub(last_focus_nudge_ms) > 30 * 60 * 1000
+            {
+                avatar_engine::emit_avatar_bubble(
+                    &app,
+                    &avatar_engine::AvatarBubblePayload::info(
+                        "检测到频繁切换应用，要试试专注一段时间吗？",
+                    ),
+                );
+                last_focus_nudge_ms = switch_ms;
+                recent_switches_ms.clear();
+            }
+        }
+
         let transition_decision = avatar_transition_decision(
             last_avatar_state.as_ref(),
             pending_avatar_state.as_ref(),

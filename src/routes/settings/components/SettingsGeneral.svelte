@@ -340,7 +340,35 @@
       </CollapsibleSection>
     </div>
 
-    <!-- 日报设置 -->
+    <!-- 工作目标 -->
+    <CollapsibleSection title={t('settingsGeneral.workGoalTitle')} storageKey="settings.general.workGoal">
+      <div class="flex items-center justify-between mt-3">
+        <div>
+          <span class="settings-text text-sm">{t('settingsGeneral.workGoalHours')}</span>
+          <p class="settings-muted mt-0.5">{t('settingsGeneral.workGoalHint')}</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <input
+            type="number"
+            min="0"
+            max="16"
+            step="0.5"
+            value={config.daily_work_goal_minutes ? config.daily_work_goal_minutes / 60 : 0}
+            on:change={(e) => {
+              const hours = parseFloat(e.target.value);
+              config.daily_work_goal_minutes = (!isNaN(hours) && hours > 0) ? Math.round(hours * 60) : null;
+              handleChange();
+            }}
+            class="w-20 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-center text-sm font-mono text-slate-800 focus:border-primary-400 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+          />
+          <span class="text-xs text-slate-500 dark:text-slate-400">{t('settingsGeneral.hours')}</span>
+        </div>
+      </div>
+      <label class="flex items-center justify-between mt-3 cursor-pointer">
+        <span class="settings-text text-sm">{t('settingsGeneral.workGoalNotifications')}</span>
+        <input type="checkbox" bind:checked={config.goal_notifications} on:change={handleChange} class="accent-primary-500" />
+      </label>
+    </CollapsibleSection>
     <div class="settings-block pt-4 border-t border-slate-200 dark:border-slate-700">
       <div class="flex flex-wrap items-center gap-3">
         <span class="settings-text">{t('settingsGeneral.reportAutoGenerateTime')}</span>
