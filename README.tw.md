@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <a href="./README.md">中文</a> · <a href="./README.tw.md">繁體中文</a> · <a href="./README.en.md">English</a>
+  <a href="./README.md">English</a> · <a href="./README.zh.md">中文</a> · <a href="./README.tw.md">繁體中文</a>
 </p>
 
 <p align="center">
@@ -59,11 +59,11 @@ Work Review 適合個人用戶用來回答這些問題：
 ## 界面預覽
 
 <p align="center">
-  <img src="docs/Introduction_zh/概览.png" alt="概覽" width="720" />
+  <img src="docs/Introduction_tw/概览.png" alt="概覽" width="720" />
 </p>
 
 <p align="center">
-  <img src="docs/Introduction_zh/助手.png" alt="工作助手" width="720" />
+  <img src="docs/Introduction_tw/助手.png" alt="工作助手" width="720" />
 </p>
 
 ---
@@ -182,6 +182,59 @@ bash scripts/deb/reinstall.sh --dry-run  # 預覽操作
 <summary>Bot 聯動（Telegram / 飛書）</summary>
 
 通過本地 API + 多設備註冊，從 Telegram / 飛書遠端查詢記錄與生成日報。支持命令：`/devices`、`/report`、`/generate` 等。僅限個人和本人多設備聯動使用。
+
+</details>
+
+<details>
+<summary>Localhost API</summary>
+
+應用啟動後自動在本地開放 HTTP API（預設 `127.0.0.1:47831`），鑑權方式為 Bearer Token（首次啟動自動產生，儲存在資料目錄的 `localhost_api_token.txt`）。
+
+### 認證
+
+所有請求（`/health` 與飛書回呼除外）需攜帶 Token：
+
+```
+Authorization: Bearer <token>
+```
+
+或透過 Query 參數：`?token=<token>`
+
+### 接口列表
+
+| 方法 | 路徑 | 說明 |
+|------|------|------|
+| GET | `/health` | 健康檢查（免鑑權） |
+| GET | `/v1/device` | 設備資訊 |
+| GET | `/v1/timeline/{date}` | 時間線（`date` 格式 `YYYY-MM-DD`，支援 `?limit=&offset=`） |
+| GET | `/v1/activities/{date}` | 活動列表（支援 `?limit=&offset=&category=`） |
+| GET | `/v1/stats/today` | 今日統計 |
+| GET | `/v1/stats/overview` | 綜合統計（`?mode=today|date|week|range`） |
+| GET | `/v1/stats/daily/{date}` | 指定日期統計 |
+| GET | `/v1/reports` | 日報列表（`?limit=`） |
+| GET | `/v1/reports/{date}` | 指定日期日報（`?locale=`） |
+| GET | `/v1/reports/generate` | 產生日報（`?date=&locale=&force=true`） |
+| POST | `/v1/reports/export-markdown` | 匯出日報 Markdown（body: `{ date, locale }`） |
+| GET | `/v1/apps/recent` | 最近使用的應用 |
+| GET | `/v1/apps/category-overview` | 應用分類概覽 |
+| GET | `/v1/categories` | 應用分類列表 |
+| GET | `/v1/categories/semantic` | 語義分類列表 |
+| GET | `/v1/hourly-summaries/{date}` | 每小時彙總 |
+| GET | `/v1/hourly-app-breakdown/{date}` | 每小時應用分佈 |
+| GET | `/v1/weekly-review` | 週報（`?date_from=&date_to=&limit=`） |
+| GET | `/v1/storage/stats` | 儲存統計 |
+
+### 範例
+
+```bash
+# 取得今日時間線
+curl -H "Authorization: Bearer $(cat ~/work-review/localhost_api_token.txt)" \
+  http://127.0.0.1:47831/v1/timeline/2026-05-20
+
+# 產生日報
+curl -H "Authorization: Bearer $(cat ~/work-review/localhost_api_token.txt)" \
+  "http://127.0.0.1:47831/v1/reports/generate?date=2026-05-20"
+```
 
 </details>
 

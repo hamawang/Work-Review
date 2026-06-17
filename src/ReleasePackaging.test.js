@@ -27,8 +27,8 @@ test('Linux deb 依赖应覆盖 gdbus 与 Wayland 截图工具', async () => {
 });
 
 test('README 应说明 mac 输入监控权限与三端桌宠联动条件', async () => {
-  const zh = await readFile(new URL('../README.md', import.meta.url), 'utf8');
-  const en = await readFile(new URL('../README.en.md', import.meta.url), 'utf8');
+  const zh = await readFile(new URL('../README.zh.md', import.meta.url), 'utf8');
+  const en = await readFile(new URL('../README.md', import.meta.url), 'utf8');
   const tw = await readFile(new URL('../README.tw.md', import.meta.url), 'utf8');
 
   assert.match(zh, /输入监控/);

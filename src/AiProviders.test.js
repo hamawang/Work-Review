@@ -6,8 +6,8 @@ test('应提供 MiniMax 作为新的 AI 提供商并同步到文档', async () =
   const [configSource, commandSource, readmeSource, readmeEnSource] = await Promise.all([
     readFile(new URL('../crates/core/src/config.rs', import.meta.url), 'utf8'),
     readFile(new URL('../src-tauri/src/commands.rs', import.meta.url), 'utf8'),
+    readFile(new URL('../README.zh.md', import.meta.url), 'utf8'),
     readFile(new URL('../README.md', import.meta.url), 'utf8'),
-    readFile(new URL('../README.en.md', import.meta.url), 'utf8'),
   ]);
 
   assert.match(configSource, /MiniMax/);
