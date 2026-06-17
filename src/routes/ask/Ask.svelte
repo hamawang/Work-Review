@@ -1,5 +1,5 @@
 <script>
-  import { onDestroy, onMount, tick } from 'svelte';
+  import { afterUpdate, onDestroy, onMount, tick } from 'svelte';
   import { invoke, Channel } from '@tauri-apps/api/core';
   import { marked } from 'marked';
   import { assistantStore, BASIC_ASSISTANT_MODEL_ID } from '../../lib/stores/assistant.js';
@@ -341,6 +341,8 @@
     const trimmed = question.trim();
     if (!trimmed || sending) return;
 
+    // 用户主动发送 → 强制切回底部跟随模式
+    stickToBottom = true;
     error = null;
     assistantStore.setSending(true);
 
@@ -386,17 +388,17 @@
 
       // 事件优先：已收到 done/error 则用事件结果；否则用 await 返回值兜底
       if (!streamSettled) {
+        // 非流式兜底：invoke 返回值直接填充
+        const fallbackContent = answer?.answer?.trim() || t('ask.emptyResponse');
         assistantStore.updateLastStreaming((m) => ({
           ...m,
-          content: answer.answer || m.content,
-          references: answer.references || m.references,
-          toolLabels: answer.toolLabels || m.toolLabels,
-          usedAi: answer.usedAi,
-          modelName: answer.modelName,
+          content: fallbackContent,
+          references: answer?.references || m.references,
+          toolLabels: answer?.toolLabels || m.toolLabels,
+          usedAi: answer?.usedAi,
+          modelName: answer?.modelName,
           streaming: false,
         }));
-        // 非流式兜底：强制滚到底部
-        if (!destroyed) await scrollToBottom('auto', 3);
       } else {
         // 流式已收尾，补 modelName（事件未携带）
         assistantStore.updateLastStreaming((m) => ({ ...m, modelName: answer.modelName }));
@@ -405,7 +407,12 @@
       if (!destroyed) {
         error = e.toString();
       }
-      assistantStore.updateLastStreaming((m) => ({ ...m, streaming: false }));
+      // 把错误写入占位消息，避免用户看到空白
+      assistantStore.updateLastStreaming((m) => ({
+        ...m,
+        content: m.content || `${t('ask.requestFailed')}: ${e}`,
+        streaming: false,
+      }));
     } finally {
       assistantStore.setSending(false);
       if (destroyed) return;
@@ -489,10 +496,18 @@
 
   $: hasConversation = messages.length > 0;
   $: input, resizeComposer();
+
+  // afterUpdate：每次 DOM 更新后，如果用户在底部附近，直接同步滚到底
+  // 这是 Svelte 推荐的"保持滚到底部"方案，比 async scrollToBottom 可靠
+  afterUpdate(() => {
+    if (stickToBottom && chatBody) {
+      chatBody.scrollTop = chatBody.scrollHeight;
+    }
+  });
 </script>
 
 <div class="page-shell ask-workbench-shell h-full" data-locale={currentLocale}>
-  <div class="ask-workbench-frame flex min-h-[calc(100vh-7rem)] flex-col">
+  <div class="ask-workbench-frame flex h-[calc(100vh-7rem)] flex-col overflow-hidden">
     <div bind:this={chatBody} class="flex-1 overflow-y-auto px-4 pb-40 pt-10" on:scroll={syncStickToBottom}>
       {#if !hasConversation}
         <div class="ask-welcome-panel mx-auto flex min-h-full max-w-4xl flex-col items-center justify-center text-center">
