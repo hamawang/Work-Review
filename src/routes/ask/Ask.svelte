@@ -288,7 +288,12 @@
         chatBody.scrollTop = chatBody.scrollHeight;
       }
     }
-    stickToBottom = true;
+  }
+
+  // 流式更新时自动滚动：仅在用户位于底部附近时才滚（主流 chat 体验）
+  function autoScrollOnStream() {
+    if (destroyed || !stickToBottom) return;
+    void scrollToBottom('auto', 1);
   }
 
   function buildHistoryPayload() {
@@ -390,12 +395,11 @@
           modelName: answer.modelName,
           streaming: false,
         }));
+        // 非流式兜底：强制滚到底部
+        if (!destroyed) await scrollToBottom('auto', 3);
       } else {
         // 流式已收尾，补 modelName（事件未携带）
         assistantStore.updateLastStreaming((m) => ({ ...m, modelName: answer.modelName }));
-      }
-      if (!destroyed) {
-        await scrollToBottom();
       }
     } catch (e) {
       if (!destroyed) {
@@ -420,7 +424,7 @@
           ...m,
           steps: [...m.steps, { tool: event.tool, label: event.label, status: 'running' }],
         }));
-        if (!destroyed) scrollToBottom();
+        autoScrollOnStream();
         return false;
       case 'stepResult':
         assistantStore.updateLastStreaming((m) => ({
@@ -432,10 +436,11 @@
             ? mergeReferences(m.references, event.references)
             : m.references,
         }));
+        autoScrollOnStream();
         return false;
       case 'token':
         assistantStore.updateLastStreaming((m) => ({ ...m, content: m.content + event.token }));
-        if (!destroyed) scrollToBottom();
+        autoScrollOnStream();
         return false;
       case 'done':
         assistantStore.updateLastStreaming((m) => ({
@@ -445,6 +450,8 @@
           toolLabels: event.toolLabels?.length ? event.toolLabels : m.toolLabels,
           streaming: false,
         }));
+        // done：用户在底部时强制滚一次（确保完整内容可见）
+        if (!destroyed) void scrollToBottom('auto', 2);
         return true;
       case 'error':
         assistantStore.updateLastStreaming((m) => ({
