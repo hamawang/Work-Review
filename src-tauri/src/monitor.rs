@@ -370,6 +370,17 @@ pub fn normalize_display_app_name(app_name: &str) -> String {
         return "Work Review Setup".to_string();
     }
 
+    // Safari / WebKit 内部 XPC service / helper（如 com.apple.SafariPlatformSupport.Helper、
+    // com.apple.WebKit.Networking）：会瞬态成为前台进程被采集，且 bundle id 含 "safari" 会被
+    // is_browser_app 误判，从而以原始 bundle id 作为独立"浏览器"条目显示。统一归并到 Safari。
+    if normalized.starts_with("com.apple.safari")
+        || normalized.starts_with("com.apple.webkit")
+        || normalized.contains("safarisupport")
+        || normalized.contains("webkit.networking")
+    {
+        return "Safari".to_string();
+    }
+
     match normalized.as_str() {
         // ── 本应用 ──
         "work-review" | "work_review" | "workreview" | "work review" => "Work Review".to_string(),
@@ -1974,6 +1985,51 @@ mod tests {
         );
     }
 
+    #[test]
+    fn 明确进程名不应被窗口标题里的浏览器关键词覆盖() {
+        // 回归：PyCharm 标题含 "edge"（test_edge_cloud.py / README_EDGE.md），
+        // 曾把 PyCharm 误判为 Microsoft Edge，导致活动 app_name 与 executable_path 不一致，
+        // 进而让图标解析（旧逻辑无条件信任 path）显示成编译器图标。
+        assert_eq!(
+            super::normalize_electron_app_name("PyCharm", "deploy_pickup – test_edge_cloud.py"),
+            "PyCharm"
+        );
+        assert_eq!(
+            super::normalize_electron_app_name("PyCharm", "algorithm_core – README_EDGE.md"),
+            "PyCharm"
+        );
+        // VS Code 可执行名为 "Code"，标题即便含浏览器关键词也不应被覆盖。
+        assert_eq!(
+            super::normalize_electron_app_name("Code", "main.ts - Google Chrome docs"),
+            "Code"
+        );
+    }
+
+    #[test]
+    fn 通用_helper_进程仍可用窗口标题还原浏览器名() {
+        // 正向：Chrome Helper 是 generic 进程，标题含 chrome 仍应还原为 Google Chrome。
+        assert_eq!(
+            super::normalize_electron_app_name("Chrome Helper", "某页面 - Google Chrome"),
+            "Google Chrome"
+        );
+    }
+
+    #[test]
+    fn safari_webkit_内部helper应归并到safari而非独立浏览器条目() {
+        // 回归：com.apple.SafariPlatformSupport.Helper / com.apple.WebKit.Networking 是
+        // Safari/WebKit 的瞬态内部进程，曾被以原始 bundle id 作为独立"浏览器"条目显示。
+        assert_eq!(
+            normalize_display_app_name("com.apple.SafariPlatformSupport.Helper"),
+            "Safari"
+        );
+        assert_eq!(
+            normalize_display_app_name("com.apple.WebKit.Networking"),
+            "Safari"
+        );
+        // 正向：Safari 本身保持不变
+        assert_eq!(normalize_display_app_name("Safari"), "Safari");
+    }
+
     #[cfg(target_os = "macos")]
     #[test]
     fn zen_浏览器应走_system_events_兜底() {
@@ -2664,8 +2720,15 @@ fn normalize_electron_app_name(process_name: &str, window_title: &str) -> String
         }
     }
 
-    // 优先检查窗口标题是否包含浏览器名称
-    // 这对于 Chrome 等浏览器至关重要，因为它们可能被误识别为 Electron
+    // 仅对 Electron / Helper 类通用进程（进程名本身无法识别具体应用）才用窗口标题推断。
+    // 否则标题里的普通关键词（如文件名 test_edge_cloud.py 含 "edge"）会覆盖明确的进程名，
+    // 把 PyCharm / VS Code 等误判成浏览器（曾导致 PyCharm 活动被记录为 Microsoft Edge）。
+    if !process_lower.contains("electron") && !process_lower.contains("helper") {
+        return process_name.to_string();
+    }
+
+    // 优先检查窗口标题是否包含浏览器名称。
+    // 这对于 Chrome 等浏览器至关重要，因为它们的 Helper 进程名是通用的，需用标题还原。
     let browser_patterns = [
         ("google chrome", "Google Chrome"),
         ("chrome", "Google Chrome"),
@@ -2690,11 +2753,6 @@ fn normalize_electron_app_name(process_name: &str, window_title: &str) -> String
             );
             return browser_name.to_string();
         }
-    }
-
-    // 如果不是 Electron 相关进程，直接返回
-    if !process_lower.contains("electron") && !process_lower.contains("helper") {
-        return process_name.to_string();
     }
 
     // Electron 应用映射表：通过窗口标题关键词识别

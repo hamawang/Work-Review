@@ -857,13 +857,13 @@ fn assistant_empty_question_message(locale: AppLocale) -> &'static str {
 fn build_assistant_system_prompt(locale: AppLocale) -> &'static str {
     match locale {
         AppLocale::ZhCn => {
-            "你是 Work Review 的工作助手。你只能基于给定记录回答。请使用简体中文回答，直接回应用户问题，先给结论再给依据。不要提及内部分析步骤，不要编造不存在的事实。"
+            "你是 Work Review 的工作助手。你可以回答任何问题。对于工作相关问题，你拥有工具可以查询用户的真实工作记录（活动时间线、统计、工作会话等），请优先使用工具获取准确数据后回答。对于非工作问题，直接用你的知识回答即可。请使用简体中文回答，先给结论再给依据，不要编造不存在的事实。"
         }
         AppLocale::ZhTw => {
-            "你是 Work Review 的工作助手。你只能基於給定記錄回答。請使用繁體中文回答，直接回應使用者問題，先給結論再給依據。不要提及內部分析步驟，也不要編造不存在的事實。"
+            "你是 Work Review 的工作助手。你可以回答任何問題。對於工作相關問題，你擁有工具可以查詢使用者的真實工作記錄（活動時間線、統計、工作會話等），請優先使用工具獲取準確資料後回答。對於非工作問題，直接用你的知識回答即可。請使用繁體中文回答，先給結論再給依據，不要編造不存在的事實。"
         }
         AppLocale::En => {
-            "You are the Work Review assistant. Answer only from the provided records. Reply in English, lead with the conclusion, then support it with evidence. Do not mention internal analysis steps and do not invent facts."
+            "You are the Work Review assistant. You can answer any question. For work-related questions, you have tools to query the user's actual work records (activity timeline, statistics, work sessions, etc.) — use them for accuracy. For non-work questions, answer directly from your knowledge. Lead with the conclusion, then support with evidence. Do not invent facts."
         }
     }
 }
@@ -7449,7 +7449,16 @@ fn macos_icon_app_path_candidates(app_name: &str, executable_path: Option<&str>)
     let mut candidates: Vec<(i32, String)> = Vec::new();
 
     if let Some(path) = executable_path.and_then(macos_bundle_path_from_executable) {
-        candidates.push((i32::MAX, path.to_string_lossy().to_string()));
+        // 仅当 executable_path 解析出的 bundle 与 app_name 匹配时才赋予最高优先级。
+        // 活动采集偶发写入脏数据（如浏览器活动的 executable_path 记录成 IDE 路径），
+        // 若无条件信任，浏览器会错误显示编译器图标；不匹配时改用名称评分兜底。
+        let bundle_name = path
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
+        if macos_score_app_bundle_name(app_name, bundle_name) > 0 {
+            candidates.push((i32::MAX, path.to_string_lossy().to_string()));
+        }
     }
 
     let mut search_roots = vec![
@@ -7503,8 +7512,10 @@ async fn get_app_icon_impl(
     use std::path::Path;
     use std::process::Command;
 
-    // 缓存目录：/tmp/work_review_icons/
-    let cache_dir = Path::new("/tmp/work_review_icons");
+    // 缓存目录：/tmp/work_review_icons_v2/
+    // v2：失效历史缓存。旧版缓存 key 仅含 app_name，曾把"executable_path 与 app_name 不一致"
+    // （如浏览器活动记录成 IDE 路径）的脏数据解析结果持久化，导致浏览器长期显示编译器图标。
+    let cache_dir = Path::new("/tmp/work_review_icons_v2");
     if !cache_dir.exists() {
         let _ = std::fs::create_dir_all(cache_dir);
     }
@@ -8686,6 +8697,39 @@ mod tests {
         assert!(
             macos_score_app_bundle_name("腾讯视频", "QQLive")
                 > macos_score_app_bundle_name("腾讯视频", "QQ")
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn 图标解析应忽略与app_name矛盾的executable_path() {
+        // 回归：活动采集偶发写入脏数据（app_name 是浏览器，executable_path 却指向 IDE）。
+        // 修复前 executable_path 无条件得 i32::MAX，浏览器会错误显示编译器图标。
+        let cands = super::macos_icon_app_path_candidates(
+            "Microsoft Edge",
+            Some("/Applications/PyCharm.app"),
+        );
+        let first = cands.first();
+        assert!(
+            first
+                .map(|p| p.contains("Microsoft Edge.app"))
+                .unwrap_or(false),
+            "浏览器不应因脏 executable_path 显示编译器图标, 实际首位: {:?}",
+            first
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn 图标解析在executable_path匹配时仍优先使用它() {
+        // executable_path 与 app_name 一致时应优先使用（最快、最准）。
+        let cands = super::macos_icon_app_path_candidates(
+            "Microsoft Edge",
+            Some("/Applications/Microsoft Edge.app"),
+        );
+        assert_eq!(
+            cands.first().map(|p| p.as_str()),
+            Some("/Applications/Microsoft Edge.app")
         );
     }
 

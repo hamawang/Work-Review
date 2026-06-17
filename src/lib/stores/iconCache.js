@@ -11,7 +11,8 @@ const MAX_ICON_CACHE = 120;
 const MAX_PERSISTED_ICON_CACHE = 36;
 const MAX_CONCURRENT_ICON_REQUESTS = 3;
 const FAILED_ICON_RETRY_MS = 30 * 1000;
-const STORAGE_KEY = 'work-review-app-icon-cache-v1';
+// v2：失效历史缓存（曾因 executable_path 脏数据缓存过错误的编译器图标）。旧 v1 key 不再读取。
+const STORAGE_KEY = 'work-review-app-icon-cache-v2';
 const _failedAt = {};
 let _activeRequestCount = 0;
 
