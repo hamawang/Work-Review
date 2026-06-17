@@ -410,6 +410,20 @@
             console.warn('日报自动生成失败:', e);
           }
         }
+
+        // AI 工作记忆：每天工作结束后自动合成洞察
+        if (currentTotalMinutes >= workEndTotalMinutes) {
+          try {
+            const config = await invoke('get_config');
+            if (config.memory_enabled && config.memory_last_synthesis_date !== today) {
+              await invoke('synthesize_insights', {});
+              await invoke('save_config', { config: { ...config, memory_last_synthesis_date: today } });
+              devLog('工作记忆合成完成');
+            }
+          } catch (e) {
+            console.warn('工作记忆合成失败:', e);
+          }
+        }
       }, 60000);  // 每分钟检查一次
       pendingCleanup.push(() => clearInterval(autoReportTimer));
 

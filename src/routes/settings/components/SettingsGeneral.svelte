@@ -369,6 +369,17 @@
         <input type="checkbox" bind:checked={config.goal_notifications} on:change={handleChange} class="accent-primary-500" />
       </label>
     </CollapsibleSection>
+
+    <!-- AI 工作记忆 -->
+    <CollapsibleSection title={t('settingsGeneral.memoryTitle')} storageKey="settings.general.memory">
+      <label class="flex items-center justify-between mt-3 cursor-pointer">
+        <div>
+          <span class="settings-text text-sm">{t('settingsGeneral.memoryEnabled')}</span>
+          <p class="settings-muted mt-0.5">{t('settingsGeneral.memoryHint')}</p>
+        </div>
+        <input type="checkbox" bind:checked={config.memory_enabled} on:change={handleChange} class="accent-primary-500" />
+      </label>
+    </CollapsibleSection>
     <div class="settings-block pt-4 border-t border-slate-200 dark:border-slate-700">
       <div class="flex flex-wrap items-center gap-3">
         <span class="settings-text">{t('settingsGeneral.reportAutoGenerateTime')}</span>

@@ -240,6 +240,21 @@ pub struct UrlUsage {
     pub duration: i64,
 }
 
+/// AI 工作记忆洞察（自进化）
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkInsight {
+    pub id: i64,
+    pub insight_type: String,
+    pub content: String,
+    pub confidence: f64,
+    pub source_date: String,
+    pub created_at: i64,
+    pub confirmed_count: i32,
+    pub denied_count: i32,
+    pub archived: bool,
+}
+
 /// 工作记忆搜索结果
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -580,6 +595,22 @@ impl Database {
             "ALTER TABLE activities ADD COLUMN screenshot_url TEXT",
             [],
         );
+
+        // === AI 工作记忆（自进化洞察） ===
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS insights (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                insight_type TEXT NOT NULL,
+                content TEXT NOT NULL,
+                confidence REAL NOT NULL DEFAULT 0.5,
+                source_date TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                confirmed_count INTEGER NOT NULL DEFAULT 0,
+                denied_count INTEGER NOT NULL DEFAULT 0,
+                archived INTEGER NOT NULL DEFAULT 0
+            )",
+            [],
+        )?;
 
         // === FTS5 全文检索索引 ===
         // activities FTS: 索引窗口标题、OCR 文本、应用名、浏览器 URL
@@ -2549,6 +2580,82 @@ impl Database {
         items.truncate(limit);
 
         Ok(items)
+    }
+
+    // ============== AI 工作记忆（自进化洞察）==============
+
+    /// 创建新洞察。返回 id。
+    pub fn create_insight(
+        &self,
+        insight_type: &str,
+        content: &str,
+        source_date: &str,
+    ) -> Result<i64> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        conn.execute(
+            "INSERT INTO insights (insight_type, content, confidence, source_date, created_at) VALUES (?1, ?2, 0.6, ?3, ?4)",
+            rusqlite::params![insight_type, content, source_date, chrono::Utc::now().timestamp()],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    /// 获取活跃洞察（未归档，confidence > 0.3），按置信度降序。
+    pub fn get_active_insights(&self, limit: usize) -> Result<Vec<WorkInsight>> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let mut stmt = conn.prepare(
+            "SELECT id, insight_type, content, confidence, source_date, created_at, confirmed_count, denied_count, archived
+             FROM insights WHERE archived = 0 AND confidence > 0.3
+             ORDER BY confidence DESC, created_at DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![limit as i64], |row| {
+            Ok(WorkInsight {
+                id: row.get(0)?,
+                insight_type: row.get(1)?,
+                content: row.get(2)?,
+                confidence: row.get(3)?,
+                source_date: row.get(4)?,
+                created_at: row.get(5)?,
+                confirmed_count: row.get(6)?,
+                denied_count: row.get(7)?,
+                archived: row.get::<_, i32>(8)? != 0,
+            })
+        })?;
+        rows.collect::<std::result::Result<Vec<_>, _>>().map_err(AppError::Database)
+    }
+
+    /// 用户反馈：positive=true（确认）→ confidence +0.1, confirmed +1
+    /// positive=false（否认）→ confidence -0.2, denied +1；低于 0.3 自动归档
+    pub fn feedback_insight(&self, id: i64, positive: bool) -> Result<()> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let delta = if positive { 0.1 } else { -0.2 };
+        conn.execute(
+            "UPDATE insights SET confidence = MIN(1.0, MAX(0.0, confidence + ?1)),
+             confirmed_count = confirmed_count + CASE WHEN ?2 = 1 THEN 1 ELSE 0 END,
+             denied_count = denied_count + CASE WHEN ?2 = 0 THEN 1 ELSE 0 END,
+             archived = CASE WHEN confidence + ?1 < 0.3 THEN 1 ELSE archived END
+             WHERE id = ?3",
+            rusqlite::params![delta, if positive { 1 } else { 0 }, id],
+        )?;
+        Ok(())
+    }
+
+    /// 检查是否存在相似洞察（同类型 + 内容包含关键词），用于去重。
+    pub fn has_similar_insight(&self, insight_type: &str, keyword: &str) -> Result<bool> {
+        let conn = self.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM insights WHERE archived = 0 AND insight_type = ?1 AND content LIKE ?2",
+            rusqlite::params![insight_type, format!("%{}%", keyword)],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
     }
 
     /// FTS 无结果时的回退搜索：使用原始关键词匹配

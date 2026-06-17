@@ -822,6 +822,12 @@ pub struct AppConfig {
     /// 达到目标时桌宠庆祝提醒
     #[serde(default)]
     pub goal_notifications: bool,
+    /// AI 工作记忆：自动合成洞察
+    #[serde(default)]
+    pub memory_enabled: bool,
+    /// 上次记忆合成日期（防同天重复）
+    #[serde(default)]
+    pub memory_last_synthesis_date: Option<String>,
     /// 是否启用桌面化身窗口
     #[serde(default)]
     pub avatar_enabled: bool,
@@ -978,6 +984,8 @@ impl Default for AppConfig {
             break_reminder_interval_minutes: default_break_reminder_interval_minutes(),
             daily_work_goal_minutes: None,
             goal_notifications: false,
+            memory_enabled: false,
+            memory_last_synthesis_date: None,
             avatar_enabled: false,
             avatar_scale: default_avatar_scale(),
             avatar_opacity: default_avatar_opacity(),
